@@ -8,7 +8,50 @@
 <title>Kiss the Bricks</title>
 <link rel="apple-touch-icon" href="apple-touch-icon.PNG">
 <style>
-html,body{margin:0;height:100%;background:#111;overflow:hidden;position:fixed;touch-action:none}
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a4d0a">
+<title>Kiss the Bricks</title>
+<link rel="apple-touch-icon" href="apple-touch-icon.PNG">
+<style>html,body{margin:0;height:100%;background:#111;overflow:hidden;position:fixed;touch-action:none}canvas{display:block}</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const isTouch='ontouchstart' in window;
+function fit(){cv.width=innerWidth;cv.height=innerHeight} fit();addEventListener('resize',fit);
+const titleImg=new Image();titleImg.src='title.PNG';
+const theme=new Audio('theme.caf');theme.loop=true;theme.volume=0.35;
+const S=650,R=280,W=55,P=4*S+2*Math.PI*R,START=250,LAPS=10;
+const VMAX=520,ACC=230,BRK=520,TURN=1.75,MPHK=235/VMAX;
+function posAt(s){ s=((s%P)+P)%P; if(s<2*S)return{x:-S+s,y:R,tx:1,ty:0}; if(s<2*S+Math.PI*R){const t=Math.PI/2-(s-2*S)/R; return{x:S+R*Math.cos(t),y:R*Math.sin(t),tx:Math.sin(t),ty:-Math.cos(t)}} if(s<4*S+Math.PI*R){const u=s-2*S-Math.PI*R; return{x:S-u,y:-R,tx:-1,ty:0}} const t=-Math.PI/2-(s-4*S-Math.PI*R)/R; return{x:-S+R*Math.cos(t),y:R*Math.sin(t),tx:Math.sin(t),ty:-Math.cos(t)} }
+function proj(x,y){ if(x>=-S&&x<=S){ if(y>=0)return{s:x+S,d:y-R}; return{s:2*S+Math.PI*R+(S-x),d:-y-R} } if(x>S){const t=Math.atan2(y,x-S); return{s:((2*S+(Math.PI/2-t)*R)%P+P)%P,d:Math.hypot(x-S,y)-R}} const t=Math.atan2(y,x+S); return{s:((4*S+Math.PI*R+(t+Math.PI/2)*R)%P+P)%P,d:Math.hypot(x+S,y)-R} }
+function capsule(r){const p=new Path2D(); p.moveTo(-S,-r);p.lineTo(S,-r);p.arc(S,0,r,-Math.PI/2,Math.PI/2); p.lineTo(-S,r);p.arc(-S,0,r,Math.PI/2,Math.PI*1.5);p.closePath();return p} const outerP=capsule(R+W),innerP=capsule(R-W);
+let state='ready',cd=0,raceTime=0,keys={},player,ais; const touch={left:false,right:false,gas:false,brake:false};
+function bs(){return Math.min(150,cv.width*0.22,(cv.width-80)/4)} function zone(x,y){ const b=bs(),h=cv.height; if(y>h-b-40){ if(x<20+b)return'left'; if(x<20+2*b+14)return'right'; if(x>cv.width-20-b)return'brake'; if(x>cv.width-20-2*b-14)return'gas'; } return null }
+function readTouches(e){ touch.left=touch.right=touch.gas=touch.brake=false; for(const t of e.touches){const z=zone(t.clientX,t.clientY);if(z)touch[z]=true} } function tapAction(){ if(state==='ready'){state='count';cd=3.2} else if(state==='done'){reset()} }
+cv.addEventListener('touchstart',e=>{e.preventDefault();initAudio();
+const m=e.changedTouches[0];
+if(m&&m.clientX>cv.width-90&&m.clientY<90){muted=!muted}
+else{readTouches(e);tapAction()}},{passive:false});
+cv.addEventListener('touchmove',e=>{e.preventDefault();readTouches(e)},{passive:false}); cv.addEventListener('touchend',e=>{e.preventDefault();readTouches(e)},{passive:false});
+addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true;if(e.key==='m')muted=!muted;if(e.key===' '){e.preventDefault();tapAction()}}); addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false});
+let muted=false,audioOn=false; function initAudio(){if(audioOn)return;audioOn=true;theme.play().catch(()=>{})}
+function reset(){state='ready';cd=0;raceTime=0;player={s:START,v:0,a:0,steer:0,lap:0,lt:0,best:+localStorage.best||0,done:false};ais=[{s:START-120,v:0,a:0,lap:0,lt:0,best:0,done:false},{s:START-300,v:0,a:0,lap:0,lt:0,best:0,done:false},{s:START-500,v:0,a:0,lap:0,lt:0,best:0,done:false}];}
+function fmt(t){return t>0?t.toFixed(2):'--.--'}
+function updPlayer(dt){ const L=keys['arrowleft']||keys['a']||touch.left; const Rt=keys['arrowright']||keys['d']||touch.right; const gas=keys['arrowup']||keys['w']||touch.gas; const br=keys['arrowdown']||keys['s']||touch.brake; if(gas)p.a=ACC;else if(br)p.a=-BRK;else p.a=-p.v*2.1; const grip=Math.min(p.v/80,1); const sf=1-0.15*(p.v/VMAX); const tgt=((L?-1:0)+(Rt?1:0))*TURN*grip*sf; p.steer=p.steer||0;p.steer+=(tgt-p.steer)*Math.min(1,dt*8); p.a+=p.steer*dt; p.v=Math.max(0,Math.min(VMAX,p.v+p.a*dt)); p.s+=p.v*dt; if(p.s>=P){p.s-=P;p.lap++;const lt=raceTime-p.lt;p.lt=raceTime;if(lt>0&&(p.best===0||lt<p.best)){p.best=lt;localStorage.best=lt}} if(p.lap>=LAPS){p.done=true;state='done'} }
+function updAI(a,dt){a.v=Math.min(VMAX*0.96,a.v+ACC*0.4*dt);a.s+=a.v*dt;if(a.s>=P){a.s-=P;a.lap++}} function updAudio(){theme.muted=muted}
+function draw(){ const w=cv.width,h=cv.height;ctx.clearRect(0,0,w,h);ctx.save(); const sc=Math.min(w/(2*(S+R+W)),h/(2*(R+W)));ctx.translate(w/2,h/2);ctx.scale(sc,sc); ctx.fillStyle='#174117';ctx.fillRect(-(S+R+W),-(R+W),2*(S+R+W),2*(R+W)); ctx.strokeStyle='#eee';ctx.lineWidth=8;ctx.stroke(outerP);ctx.strokeStyle='#111';ctx.lineWidth=8;ctx.stroke(innerP); const pxy=posAt(player.s);ctx.fillStyle='#e22';ctx.beginPath();ctx.arc(pxy.x,pxy.y,18,0,7);ctx.fill(); for(const a of ais){const q=posAt(a.s);ctx.fillStyle='#fc2';ctx.beginPath();ctx.arc(q.x,q.y,16,0,7);ctx.fill()} ctx.restore(); ctx.fillStyle='#fff';ctx.textAlign='right';ctx.font='bold 22px sans-serif'; ctx.fillText('LAP  '+fmt(state==='race'?raceTime-player.lt:0),w-20,100); ctx.fillText('BEST '+fmt(player.best),w-20,134); if(state==='ready'){ctx.textAlign='center';ctx.font='bold 28px sans-serif';ctx.fillText('TAP OR SPACE TO START',w/2,80)} if(state==='count'){ctx.textAlign='center';ctx.font='bold 72px sans-serif';ctx.fillText(Math.ceil(cd),w/2,h/2)} if(state==='done'){ctx.textAlign='center';ctx.font='bold 42px sans-serif';ctx.fillText('FINISH!',w/2,h/2);ctx.font='bold 22px sans-serif';ctx.fillText('TAP OR SPACE TO RESTART',w/2,h/2+44)} if(isTouch){const b=bs(),y=h-b-20;ctx.globalAlpha=.28;ctx.fillStyle='#fff';ctx.fillRect(20,y,b,b);ctx.fillRect(34+b,y,b,b);ctx.fillRect(w-20-2*b-14,y,b,b);ctx.fillRect(w-20-b,y,b,b);ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.textAlign='center';ctx.font='bold 16px sans-serif';ctx.fillText('←',20+b/2,y+b/2+6);ctx.fillText('→',34+b+b/2,y+b/2+6);ctx.fillText('BRAKE',w-20-2*b-14+b/2,y+b/2+11);ctx.fillText('GAS',w-20-2*b-14+b/2,y+b/2+11);
+const mx=w-64,my=24; ctx.globalAlpha=0.5;ctx.fillStyle=muted?'#d0312d':'#666'; ctx.beginPath();ctx.arc(mx,my,26,0,7);ctx.fill(); ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.font='bold 26px sans-serif'; ctx.fillText(muted?'X':'M',mx-8,my+9); } }
+let last=0;function loop(t){const dt=Math.min(.05,(t-last)/1000||0);last=t;if(state==='count'){cd-=dt;if(cd<=0){state='race';raceTime=0;player.lt=0}}if(state==='race')raceTime+=dt;updPlayer(dt);for(const a of ais)updAI(a,dt);updAudio();draw();requestAnimationFrame(loop)} reset();requestAnimationFrame(loop);
+</script>
+</body>
+</html>html,body{margin:0;height:100%;background:#111;overflow:hidden;position:fixed;touch-action:none}
 canvas{display:block}
 </style>
 </head>
