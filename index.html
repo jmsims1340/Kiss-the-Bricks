@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0a4d0a">
 <title>Kiss the Bricks</title>
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.PNG">
 <style>
 html,body{margin:0;height:100%;background:#111;overflow:hidden;position:fixed;touch-action:none}
 canvas{display:block}
@@ -19,8 +19,8 @@ const cv=document.getElementById('c'),ctx=cv.getContext('2d');
 const isTouch='ontouchstart' in window;
 function fit(){cv.width=innerWidth;cv.height=innerHeight}
 fit();addEventListener('resize',fit);
-const titleImg=new Image();titleImg.src='title.png';
-const theme=new Audio('theme.mp3');theme.loop=true;theme.volume=0.35;
+const titleImg=new Image();titleImg.src='title.PNG';
+const theme=new Audio('theme.caf');theme.loop=true;theme.volume=0.35;
 const S=650,R=280,W=55,P=4*S+2*Math.PI*R,START=250,LAPS=10;
 const VMAX=520,ACC=230,BRK=520,TURN=1.6,MPHK=235/VMAX;
 function posAt(s){
