@@ -21,7 +21,7 @@ function fit(){cv.width=innerWidth;cv.height=innerHeight}
 fit();addEventListener('resize',fit);
 const titleImg=new Image();titleImg.src='title.PNG';
 const theme=new Audio('theme.caf');theme.loop=true;theme.volume=0.35;
-const S=650,R=280,W=55,P=4*S+2*Math.PI*R,START=250,LAPS=10;
+const S=650,R=280,W=75,P=4*S+2*Math.PI*R,START=250,LAPS=10;
 const VMAX=520,ACC=230,BRK=520,TURN=2.0,GRIP=14,MPHK=235/VMAX;
 function posAt(s){
 s=((s%P)+P)%P;
@@ -54,16 +54,15 @@ function bs(){return Math.min(150,cv.width*0.22,(cv.width-80)/4)}
 function zone(x,y){
 const b=bs(),h=cv.height;
 if(y>h-b-40){
-if(x<20+b)return'left';
-if(x<20+2*b+14)return'right';
 if(x>cv.width-20-b)return'brake';
 if(x>cv.width-20-2*b-14)return'brake';
 }
 return null
 }
 function readTouches(e){
-touch.left=touch.right=touch.gas=touch.brake=false;
+touch.brake=false;
 for(const t of e.touches){const z=zone(t.clientX,t.clientY);if(z)touch[z]=true}
+readWheel(e)
 }
 function tapAction(){
 if(state==='ready'){state='count';cd=3.2}
@@ -92,10 +91,10 @@ place(player,g,lat);
 reset();
 function updPlayer(dt){
 const p=player;
-const L=keys.arrowleft||keys.a||touch.left,
-Rt=keys.arrowright||keys.d||touch.right,
-U=keys.arrowup||keys.w||touch.gas,
+const L=keys.arrowleft||keys.a,
+Rt=keys.arrowright||keys.d,
 D=keys.arrowdown||keys.s||touch.brake;
+if(!wheelOn)wheelA*=Math.exp(-8*dt);
 if(state==='race'){
 if(D)p.v-=BRK*dt;
 else p.v+=ACC*dt;
@@ -104,7 +103,7 @@ p.v-=p.v*0.25*dt;if(p.v<0)p.v=0;if(p.v>VMAX)p.v=VMAX;
 p.vx=p.vx||0;p.vy=p.vy||0;
 const grip=Math.min(p.v/80,1);
 const sf=1-0.15*(p.v/VMAX);
-const tgt=((L?-1:0)+(Rt?1:0))*TURN*grip*sf;
+const tgt=((L?-1:0)+(Rt?1:0)+wheelA/2.1)*TURN*grip*sf;
 p.steer=p.steer||0;p.steer+=(tgt-p.steer)*Math.min(1,dt*8);
 p.a+=p.steer*dt;
 const fx=Math.cos(p.a),fy=Math.sin(p.a);
@@ -163,16 +162,20 @@ function drawButtons(){
 if(!isTouch)return;
 const w=cv.width,h=cv.height,b=bs(),y=h-b-30;
 ctx.globalAlpha=0.4;
-ctx.fillStyle=touch.left?'#f2b632':'#666';ctx.fillRect(20,y,b,b);
-ctx.fillStyle=touch.right?'#f2b632':'#666';ctx.fillRect(20+b+14,y,b,b);
 ctx.fillStyle=touch.brake?'#d0312d':'#666';ctx.fillRect(w-20-2*b-14,y,2*b+14,b);
 ctx.globalAlpha=1;
 ctx.fillStyle='#fff';ctx.textAlign='center';
-ctx.font='bold 42px sans-serif';
-ctx.fillText('<',20+b/2,y+b/2+15);
-ctx.fillText('>',20+b+14+b/2,y+b/2+15);
 ctx.font='bold 30px sans-serif';
 ctx.fillText('BRK',w-20-b-7,y+b/2+11);
+const wp=wheelPos();
+ctx.save();ctx.translate(wp.x,wp.y);ctx.rotate(wheelA);
+ctx.globalAlpha=0.55;ctx.strokeStyle='#f2b632';ctx.lineWidth=10;
+ctx.beginPath();ctx.arc(0,0,wp.r,0,7);ctx.stroke();
+ctx.lineWidth=6;ctx.strokeStyle='#aaa';
+ctx.beginPath();ctx.moveTo(-wp.r,0);ctx.lineTo(wp.r,0);ctx.moveTo(0,-wp.r);ctx.lineTo(0,wp.r);ctx.stroke();
+ctx.fillStyle='#f2b632';
+ctx.beginPath();ctx.arc(0,-wp.r,10,0,7);ctx.fill();
+ctx.restore();
 const mx=w-64,my=24;
 ctx.globalAlpha=0.5;ctx.fillStyle=muted?'#d0312d':'#666';
 ctx.beginPath();ctx.arc(mx,my,26,0,7);ctx.fill();
@@ -248,6 +251,19 @@ ctx.textAlign='left'
 }
 let ac=null,osc=null,gain=null,muted=false;
 function setMute(v){muted=v;theme.muted=v;if(v){theme.pause()}else{theme.play()}}
+let wheelA=0,wheelOn=false;
+function wheelPos(){const b=bs(),h=cv.height;return{x:110+b/2,y:h-85,r:Math.min(85,b/2+38)}}
+function readWheel(e){
+const wp=wheelPos();wheelOn=false;
+for(const t of e.touches){
+const dx=t.clientX-wp.x,dy=t.clientY-wp.y;
+if(dx*dx+dy*dy<wp.r*wp.r*1.8){
+let rel=Math.atan2(dx,-dy);
+if(rel>2.1)rel=2.1;if(rel<-2.1)rel=-2.1;
+wheelA=rel;wheelOn=true
+}
+}
+}
 function initAudio(){theme.play();if(ac)return;
 ac=new(window.AudioContext||window.webkitAudioContext)();
 osc=ac.createOscillator();osc.type='sawtooth';
