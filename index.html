@@ -22,7 +22,7 @@ fit();addEventListener('resize',fit);
 const titleImg=new Image();titleImg.src='title.PNG';
 const theme=new Audio('theme.caf');theme.loop=true;theme.volume=0.35;
 const S=650,R=280,W=55,P=4*S+2*Math.PI*R,START=250,LAPS=10;
-const VMAX=520,ACC=230,BRK=520,TURN=1.75,MPHK=235/VMAX;
+const VMAX=520,ACC=230,BRK=520,TURN=2.0,GRIP=8,MPHK=235/VMAX;
 function posAt(s){
 s=((s%P)+P)%P;
 if(s<2*S)return{x:-S+s,y:R,tx:1,ty:0};
@@ -101,12 +101,17 @@ if(D)p.v-=BRK*dt;
 else p.v+=ACC*dt;
 }
 p.v-=p.v*0.25*dt;if(p.v<0)p.v=0;if(p.v>VMAX)p.v=VMAX;
+p.vx=p.vx||0;p.vy=p.vy||0;
 const grip=Math.min(p.v/80,1);
-const sf=1-0.15*(p.v/VMAX);
+const sf=1-0.25*(p.v/VMAX);
 const tgt=((L?-1:0)+(Rt?1:0))*TURN*grip*sf;
 p.steer=p.steer||0;p.steer+=(tgt-p.steer)*Math.min(1,dt*8);
 p.a+=p.steer*dt;
-p.x+=Math.cos(p.a)*p.v*dt;p.y+=Math.sin(p.a)*p.v*dt;
+const fx=Math.cos(p.a),fy=Math.sin(p.a);
+let fwd=p.vx*fx+p.vy*fy,lat=p.vx*fy-p.vy*fx;
+fwd=p.v;lat*=Math.exp(-GRIP*dt);
+p.vx=fwd*fx+lat*fy;p.vy=fwd*fy-lat*fx;
+p.x+=p.vx*dt;p.y+=p.vy*dt;
 const q=proj(p.x,p.y),lim=W-10;
 if(Math.abs(q.d)>lim-8)p.v=Math.min(p.v,180);
 if(Math.abs(q.d)>lim){
