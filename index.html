@@ -22,7 +22,7 @@ fit();addEventListener('resize',fit);
 const titleImg=new Image();titleImg.src='title.PNG';
 const theme=new Audio('theme.caf');theme.loop=true;theme.volume=0.35;
 const S=650,R=280,W=55,P=4*S+2*Math.PI*R,START=250,LAPS=10;
-const VMAX=520,ACC=230,BRK=520,TURN=2.0,GRIP=8,MPHK=235/VMAX;
+const VMAX=520,ACC=230,BRK=520,TURN=2.0,GRIP=14,MPHK=235/VMAX;
 function posAt(s){
 s=((s%P)+P)%P;
 if(s<2*S)return{x:-S+s,y:R,tx:1,ty:0};
@@ -84,7 +84,7 @@ c.x=n.x+nx*lat;c.y=n.y+ny*lat;c.a=Math.atan2(n.ty,n.tx);c.best=0;c.lt=0
 function reset(){
 state='ready';raceTime=0;
 player={col:'#f2b632',isP:true};
-ais=[{col:'#d0312d',vt:478},{col:'#1f6fd6',vt:490},{col:'#e8e8e8',vt:502}];
+ais=[{col:'#d0312d',vt:445},{col:'#1f6fd6',vt:460},{col:'#e8e8e8',vt:475}];
 let g=START-60,lat=-18;
 for(const a of ais){place(a,g,lat);g-=45;lat=-lat}
 place(player,g,lat);
@@ -103,7 +103,7 @@ else p.v+=ACC*dt;
 p.v-=p.v*0.25*dt;if(p.v<0)p.v=0;if(p.v>VMAX)p.v=VMAX;
 p.vx=p.vx||0;p.vy=p.vy||0;
 const grip=Math.min(p.v/80,1);
-const sf=1-0.25*(p.v/VMAX);
+const sf=1-0.15*(p.v/VMAX);
 const tgt=((L?-1:0)+(Rt?1:0))*TURN*grip*sf;
 p.steer=p.steer||0;p.steer+=(tgt-p.steer)*Math.min(1,dt*8);
 p.a+=p.steer*dt;
@@ -113,10 +113,10 @@ fwd=p.v;lat*=Math.exp(-GRIP*dt);
 p.vx=fwd*fx+lat*fy;p.vy=fwd*fy-lat*fx;
 p.x+=p.vx*dt;p.y+=p.vy*dt;
 const q=proj(p.x,p.y),lim=W-10;
-if(Math.abs(q.d)>lim-8)p.v=Math.min(p.v,180);
+if(Math.abs(q.d)>lim-8)p.v=Math.min(p.v,260);
 if(Math.abs(q.d)>lim){
 const n=posAt(q.s),nx=-n.ty,ny=n.tx,cl=Math.sign(q.d)*lim;
-p.x=n.x+nx*cl;p.y=n.y+ny*cl;p.v*=0.6
+p.x=n.x+nx*cl;p.y=n.y+ny*cl;p.v*=0.85
 }
 for(const a of ais){
 const dx=p.x-a.x,dy=p.y-a.y,dd=Math.hypot(dx,dy);
