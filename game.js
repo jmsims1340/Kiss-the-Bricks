@@ -9,7 +9,7 @@ const fmt = (t) => { if (!t) return '--'; const m = Math.floor(t / 60), s = t - 
 const fmt1 = (t) => { const m = Math.floor(t / 60), s = t - m * 60; return m + ':' + (s < 10 ? '0' : '') + s.toFixed(1); };
 
 // ---------------- settings ----------------
-const DEF = { track: 'indy', laps: 10, steer: 'drag', sens: 1, assist: true, throttle: 'auto', difficulty: 'rookie', grid: 11, field: 33, sound: true };
+const DEF = { track: 'indy', laps: 10, steer: 'drag', sens: 1, assist: true, throttle: 'auto', difficulty: 'rookie', grid: 11, field: 33, sound: true, coach: true, coachVoice: false };
 let cfg = Object.assign({}, DEF);
 try { Object.assign(cfg, JSON.parse(localStorage.getItem('ktb-settings') || '{}')); } catch (e) {}
 for (const k of ['laps', 'grid', 'field', 'sens']) if (Q.has(k)) cfg[k] = +Q.get(k);
@@ -147,7 +147,7 @@ const hossTex = canvasTex(512, 256, (g, w, h) => {
   g.fillStyle = '#d71920'; g.fillRect(0, 210, w, 14); g.fillStyle = '#fff'; g.fillRect(0, 224, w, 6);
 }, false);
 // geometry is built on GT, which may differ from the track being raced (the road course scenery includes the oval)
-let GT = S.TRACK;
+let GT = S.TRACK, standAt = null;
 const lam = (o) => new THREE.MeshLambertMaterial(o);
 // consecutive runs of s where keep(s) holds, so a ribbon can skip gaps
 function runs(ss, keep) { const out = []; let cur = []; for (const s of ss) { if (keep(s)) cur.push(s); else { if (cur.length > 1) out.push(cur); cur = []; } } if (cur.length > 1) out.push(cur); return out; }
@@ -240,6 +240,7 @@ function buildOvalScene(T, o) {
   // starter's stand on the outside wall at the line
   W.push(placeAlong(box(3, 3, 4, 0, 4.2, 0, 0xffffff), SL, dOut(SL) + 2.2, null));
   W.push(placeAlong(box(0.4, 3, 0.4, 0, 1.5, 0, 0x777777), SL, dOut(SL) + 2.2, null));
+  S.surfaceOn(T, SL, dOut(SL) + 2.2, P); standAt = { x: P.x, y: P.y, z: P.z, tx: P.tx, tz: P.tz };
   // trees (infield + outside)
   const tree = (s, d, sc) => { S.surfaceOn(T, s, d, P); if (!keepP(P.x, P.z, 10)) return; W.push(placeAlong(merge([tint(new THREE.CylinderGeometry(0.4 * sc, 0.5 * sc, 3 * sc, 5).translate(0, 1.5 * sc, 0), 0x5b4130), tint(new THREE.ConeGeometry(3.2 * sc, 8 * sc, 6).translate(0, 6.5 * sc, 0), o.treeHex || 0x2f6b2a)]), s, d, 0)); };
   let seed = 11; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
@@ -606,7 +607,7 @@ $('btnTrackBack').addEventListener('click', () => { show('tracks', false); show(
 
 function toTitle() {
   state = 'title'; show('title', true); hudEl.classList.add('hidden'); playTheme(true); engineSound(0, false, 0);
-  race = null; kissMesh.visible = false; stopConfetti();
+  race = null; kissMesh.visible = false; stopConfetti(); clearSkids(); coachEl.classList.remove('on'); flagbar.classList.remove('on'); flagObj.visible = false; if (skidA) skidA.g.gain.value = 0;
 }
 function togglePause(force) {
   if (state !== 'race' && state !== 'paused') return;
@@ -624,7 +625,8 @@ function startRace() {
   $('hField').textContent = '/' + race.cars.length; $('hLaps').textContent = '/' + cfg.laps;
   tiltNeutral = null; input.steer = 0; input.rawSteer = 0;
   theme.volume = 0.3;
-  showBanner('ROLLING START', 'gold', 2.5);
+  banner.classList.remove('on'); msgT = 0;
+  resetCoach(); clearSkids(); flagPhase = ''; flagState = ''; setFlag('yellow'); placeFlag(); spinCam = 0;
   const how = cfg.steer === 'tilt' ? 'Tilt the phone to steer.' : (matchMedia('(pointer:fine)').matches && !('ontouchstart' in window) ? 'Arrow keys to steer, ↓ to lift.' : 'Drag a thumb left/right anywhere to steer.');
   const road = S.INFO.kind === 'road';
   hint.textContent = road ? how + ' ' + (cfg.throttle === 'auto' ? 'Gas is automatic. Hold BRAKE before the corners; it glows when you need it.' : 'Hold GAS to go, BRAKE before the corners.')
@@ -740,14 +742,280 @@ function drawConfetti(dt) {
   conf = conf.filter((p) => p.y < fx.height + 30); if (!conf.length && !fxp.length && !guns.length) { confOn = false; fctx.clearRect(0, 0, fx.width, fx.height); }
 }
 
+
+// ---------------- tyre smoke, skid marks, skid sound (spins and slides) ----------------
+const SMK = 260;
+const smkPos = new Float32Array(SMK * 3), smkVel = new Float32Array(SMK * 3), smkAge = new Float32Array(SMK).fill(99), smkLife = new Float32Array(SMK).fill(1);
+const smkSize = new Float32Array(SMK), smkAlpha = new Float32Array(SMK), smkR0 = new Float32Array(SMK), smkR1 = new Float32Array(SMK), smkA0 = new Float32Array(SMK);
+const smkGeo = new THREE.BufferGeometry();
+smkGeo.setAttribute('position', new THREE.BufferAttribute(smkPos, 3)); smkGeo.setAttribute('aSize', new THREE.BufferAttribute(smkSize, 1)); smkGeo.setAttribute('aAlpha', new THREE.BufferAttribute(smkAlpha, 1));
+const smkMat = new THREE.ShaderMaterial({
+  uniforms: { uScale: { value: 800 } }, transparent: true, depthWrite: false,
+  vertexShader: 'attribute float aSize; attribute float aAlpha; uniform float uScale; varying float vA; void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv; gl_PointSize = clamp(aSize * uScale / max(0.5, -mv.z), 0.0, 480.0); vA = aAlpha; }',
+  fragmentShader: 'varying float vA; void main(){ vec2 d = gl_PointCoord - 0.5; float r = length(d); if (r > 0.5) discard; float a = vA * smoothstep(0.5, 0.05, r); gl_FragColor = vec4(0.88, 0.88, 0.9, a); }',
+});
+const smoke = new THREE.Points(smkGeo, smkMat); smoke.frustumCulled = false; smoke.renderOrder = 3; scene.add(smoke);
+let smkI = 0, smkAcc = 0;
+function puff(x, y, z, vx, vy, vz, k) {
+  const i = smkI++ % SMK;
+  smkPos[i * 3] = x; smkPos[i * 3 + 1] = y; smkPos[i * 3 + 2] = z;
+  smkVel[i * 3] = vx; smkVel[i * 3 + 1] = vy; smkVel[i * 3 + 2] = vz;
+  smkAge[i] = 0; smkLife[i] = 1.3 + Math.random() * 0.9; smkR0[i] = 0.9 + Math.random() * 0.5; smkR1[i] = 3.6 + Math.random() * 2.2; smkA0[i] = 0.22 + 0.33 * k;
+}
+const MARKS = 500;
+const markMesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x141414, transparent: true, opacity: 0.5, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }), MARKS);
+markMesh.frustumCulled = false; markMesh.count = 0; markMesh.renderOrder = 1; scene.add(markMesh);
+let markI = 0; const lastWheel = [null, null];
+const mA = new THREE.Vector3(), mB = new THREE.Vector3(), mX = new THREE.Vector3(), mZ = new THREE.Vector3();
+function skidMark(w, pos, up, k) {
+  const last = lastWheel[w];
+  if (!last) { lastWheel[w] = pos.clone(); return; }
+  const len = last.distanceTo(pos);
+  if (len < 0.7) return;
+  if (len < 8) {
+    mZ.copy(pos).sub(last).normalize(); mX.crossVectors(up, mZ).normalize();
+    M4.makeBasis(mX, up, mZ); M4.scale(vT.set(0.34, 1, len + 0.05));
+    M4.setPosition((pos.x + last.x) / 2 + up.x * 0.03, (pos.y + last.y) / 2 + up.y * 0.03, (pos.z + last.z) / 2 + up.z * 0.03);
+    markMesh.setMatrixAt(markI % MARKS, M4); markI++; markMesh.count = Math.min(MARKS, markI); markMesh.instanceMatrix.needsUpdate = true;
+  }
+  last.copy(pos);
+}
+function clearSkids() { markI = 0; markMesh.count = 0; lastWheel[0] = lastWheel[1] = null; smkAge.fill(99); smkAlpha.fill(0); }
+const wheelF = { pos: new THREE.Vector3(), fwd: new THREE.Vector3(), right: new THREE.Vector3(), up: new THREE.Vector3() };
+function updateSkids(dt) {
+  const p = race && race.player; const k = p && state === 'race' ? (p.skid || 0) : 0;
+  if (p && k > 0.12) {
+    carFrame(p.dist, p.d, p.psi + (p.yaw || 0), wheelF);
+    const tf = { x: 0, z: 0 }; carFrame(p.dist, p.d, p.psi, tmpF); // direction of travel, for the smoke's drift
+    for (let w = 0; w < 2; w++) {
+      mA.copy(wheelF.pos).addScaledVector(wheelF.fwd, -1.65).addScaledVector(wheelF.right, w ? 0.82 : -0.82);
+      skidMark(w, mA, wheelF.up, k);
+    }
+    smkAcc += dt * (12 + 46 * k);
+    while (smkAcc > 1) {
+      smkAcc -= 1; const w = Math.random() < 0.5 ? 1 : -1;
+      mB.copy(wheelF.pos).addScaledVector(wheelF.fwd, -1.65).addScaledVector(wheelF.right, 0.82 * w).addScaledVector(wheelF.up, 0.35);
+      const carry = 0.18;
+      puff(mB.x, mB.y, mB.z, tmpF.fwd.x * p.v * carry + (Math.random() - 0.5) * 2.4, 0.9 + Math.random() * 1.3, tmpF.fwd.z * p.v * carry + (Math.random() - 0.5) * 2.4, k);
+    }
+  } else { lastWheel[0] = lastWheel[1] = null; }
+  let any = false;
+  for (let i = 0; i < SMK; i++) {
+    if (smkAge[i] >= smkLife[i]) { smkAlpha[i] = 0; continue; }
+    any = true; smkAge[i] += dt; const x = Math.min(1, smkAge[i] / smkLife[i]);
+    const drag = Math.exp(-dt * 1.6); smkVel[i * 3] *= drag; smkVel[i * 3 + 2] *= drag; smkVel[i * 3 + 1] *= Math.exp(-dt * 0.8);
+    smkPos[i * 3] += smkVel[i * 3] * dt; smkPos[i * 3 + 1] += smkVel[i * 3 + 1] * dt; smkPos[i * 3 + 2] += smkVel[i * 3 + 2] * dt;
+    smkSize[i] = smkR0[i] + (smkR1[i] - smkR0[i]) * Math.sqrt(x);
+    smkAlpha[i] = smkA0[i] * Math.min(1, x * 8) * (1 - x) * (1 - x);
+  }
+  smoke.visible = any;
+  if (any) { smkGeo.attributes.position.needsUpdate = true; smkGeo.attributes.aSize.needsUpdate = true; smkGeo.attributes.aAlpha.needsUpdate = true; smkMat.uniforms.uScale.value = renderer.domElement.height / (2 * Math.tan(camera.fov * Math.PI / 360)); }
+  skidSound(k);
+}
+let skidA = null;
+function skidSound(k) {
+  if (!actx || !cfg.sound) return;
+  if (!skidA) {
+    try {
+      const buf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      const src = actx.createBufferSource(); src.buffer = buf; src.loop = true;
+      const bp = actx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1300; bp.Q.value = 2.2;
+      const g = actx.createGain(); g.gain.value = 0; src.connect(bp); bp.connect(g); g.connect(actx.destination); src.start();
+      skidA = { g, bp };
+    } catch (e) { skidA = false; }
+  }
+  if (!skidA) return;
+  const t = actx.currentTime, on = state === 'race' && k > 0.15;
+  skidA.g.gain.setTargetAtTime(on ? 0.05 + 0.13 * k : 0, t, on ? 0.04 : 0.12);
+  skidA.bp.frequency.setTargetAtTime(1050 + 700 * k + Math.sin(t * 23) * 120, t, 0.05);
+}
+
+// ---------------- starter's flag (yellow before the start, green at the drop, white, checkered) ----------------
+const flagGeo = new THREE.PlaneGeometry(4.4, 2.9, 12, 5); flagGeo.translate(2.2 + 0.15, 0, 0);
+const flagBase = flagGeo.attributes.position.array.slice();
+const flagMat = new THREE.MeshBasicMaterial({ color: 0xffd400, side: THREE.DoubleSide });
+const flagCheck = canvasTex(64, 64, (g2, w, h) => { for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) { g2.fillStyle = (x + y) % 2 ? '#111' : '#f4f4f0'; g2.fillRect(x * 16, y * 16, 16, 16); } }, false);
+const flagArm = new THREE.Group(), flagObj = new THREE.Group();
+const flagMesh = new THREE.Mesh(flagGeo, flagMat); flagArm.add(flagMesh);
+const stick = new THREE.Mesh(new THREE.BoxGeometry(0.12, 4.0, 0.12).translate(0, -0.6, 0), lam({ color: 0x8a6a3a })); flagArm.add(stick);
+flagObj.add(flagArm); scene.add(flagObj); flagObj.visible = false;
+let flagState = 'yellow';
+function placeFlag() {
+  if (!standAt) { flagObj.visible = false; return; }
+  const inX = standAt.tz, inZ = -standAt.tx;  // toward the track (the stand is on the outside)
+  const m = new THREE.Matrix4(); const xA = new THREE.Vector3(inX, 0, inZ), yA = new THREE.Vector3(0, 1, 0), zA = new THREE.Vector3(standAt.tx, 0, standAt.tz);
+  m.makeBasis(xA, yA, zA); m.setPosition(standAt.x + inX * 1.0, standAt.y + 7.4, standAt.z + inZ * 1.0);
+  flagObj.matrixAutoUpdate = false; flagObj.matrix.copy(m); flagObj.visible = true;
+}
+function setFlag(kind) {
+  if (flagState === kind) return; flagState = kind;
+  flagMat.map = kind === 'checker' ? flagCheck : null;
+  flagMat.color.set(kind === 'yellow' ? 0xffd400 : kind === 'green' ? 0x1fd14a : 0xffffff); flagMat.needsUpdate = true;
+}
+function updateFlag(t) {
+  if (!flagObj.visible) return;
+  // the starter waves it: a big swing plus a ripple running out along the cloth
+  flagArm.rotation.z = 0.35 + Math.sin(t * 5.2) * 0.45; flagArm.rotation.x = Math.sin(t * 5.2 + 1.1) * 0.25;
+  const a = flagGeo.attributes.position.array;
+  for (let i = 0; i < a.length; i += 3) { const x = flagBase[i]; a[i + 2] = flagBase[i + 2] + Math.sin(x * 1.7 - t * 11) * 0.28 * (x / 4.5); }
+  flagGeo.attributes.position.needsUpdate = true;
+}
+
+
+// ---------------- coach (short, timely callouts beside the spotter) ----------------
+// Priority (high wins, and may cut in after half a second): brake 100 > lift/wall 95 > spin 90 > slide 85 > laps 70 >
+// draft 60 > line 45 > turn in / apex / track out 40 > encouragement 25. Every line has its own cooldown, there is a
+// short gap between lines, and nothing below "laps" talks over a banner (GREEN, LAP, WHITE FLAG).
+const coachEl = $('coach'), coachTxt = $('coachTxt');
+let coach = null, corners = [];
+function resetCoach() {
+  coach = { t: 0, cur: null, until: 0, lastEnd: -9, cool: {}, lastPos: 0, posT: 0, slid: 0, calmT: 0, trouble: {}, lapOf: {}, done: {}, highT: 0, paceSaid: 0 };
+  coachEl.classList.remove('on', 'urgent');
+  buildCorners();
+}
+function buildCorners() {
+  const T = S.TRACK, n = T.n, ds = T.DS, road = S.INFO.kind === 'road'; corners = [];
+  if (!road) return;
+  const thr = 1 / 230; let i0 = -1;
+  // start the scan on a straight so no corner is split by the lap's wrap
+  let start = 0; for (let i = 0; i < n; i++) if (Math.abs(T.K[i]) < thr / 3) { start = i; break; }
+  const raw = [];
+  for (let j = 0; j <= n; j++) {
+    const i = (start + j) % n, on = Math.abs(T.K[i]) > thr && j < n;
+    if (on && i0 < 0) i0 = j;
+    if (!on && i0 >= 0) { raw.push([i0, j - 1]); i0 = -1; }
+  }
+  for (const [a, b] of raw) {
+    if ((b - a) * ds < 12) continue;
+    let ap = a, km = 0, vmin = 1e9; for (let j = a; j <= b; j++) { const i = (start + j) % n; if (Math.abs(T.K[i]) > km) { km = Math.abs(T.K[i]); ap = j; } vmin = Math.min(vmin, T.VPP[i]); }
+    const ia = (start + a) % n, iap = (start + ap) % n, ib = (start + b) % n;
+    const vBefore = T.VPP[(ia - Math.round(160 / ds) + n) % n];
+    corners.push({ entry: ia * ds, apex: iap * ds, exit: ib * ds, sign: Math.sign(T.K[iap]), vmin, big: vmin < 38, brake: vBefore - vmin > 8, id: corners.length });
+  }
+}
+const relS = (a, b) => { let r = S.wrap(a - b); if (r > L / 2) r -= L; return r; }; // a relative to b, -L/2..L/2
+function coachSay(key, text, pri, dur = 1.5, cool = 5) {
+  if (!cfg.coach || !coach) return false;
+  const now = coach.t;
+  if ((coach.cool[key] || -99) > now) return false;
+  if (pri < 70 && msgT > 0.15) return false;
+  if (coach.cur) { if (pri <= coach.cur.pri || now - coach.cur.t0 < 0.5) return false; }
+  else if (now - coach.lastEnd < (pri >= 90 ? 0 : 0.7)) return false;
+  coach.cur = { key, pri, t0: now }; coach.until = now + dur; coach.cool[key] = now + cool;
+  coachTxt.textContent = text; coachEl.classList.toggle('urgent', pri >= 90);
+  restartAnim(coachEl, 'pop'); coachEl.classList.add('on');
+  if (cfg.coachVoice && window.speechSynthesis) { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text.replace(/[!.…]+$/, '')); u.rate = 1.2; u.pitch = 0.9; speechSynthesis.speak(u); } catch (e) {} }
+  window.KTB.coachLog.push({ t: +now.toFixed(2), key, text, pri });
+  return true;
+}
+function coachEvent(e) {
+  if (!coach) return;
+  const p = race.player;
+  if (e.type === 'spin') {
+    const c = cornerAt(S.wrap(p.dist), 60); if (c) coach.trouble[c.id] = 2;
+    coach.cur = null; coachSay('spin', 'Hold on… let it stop rotating', 92, 1.8, 3);
+  } else if (e.type === 'spinEnd') { coach.cur = null; coachSay('spinEnd', 'Gather it up. Smooth on the throttle', 91, 2.0, 3); coach.slid = 0; }
+  else if (e.type === 'lap') {
+    const left = race.opts.laps - e.lap;
+    if (left === 1) coachSay('lap', 'Last lap! Bring it home', 75, 2.0, 3);
+    else if (left > 1) coachSay('lap', 'Lap ' + (e.lap + 1) + ' of ' + race.opts.laps, 70, 1.6, 3);
+  } else if (e.type === 'wall') coachSay('wall', S.INFO.kind === 'road' ? 'Stay off the tyres. Brake a touch earlier' : 'Easy, off the wall. Give it room', 60, 1.6, 8);
+}
+function cornerAt(s, back = 0) { for (const c of corners) { const a = relS(s, c.entry), len = relS(c.exit, c.entry); if (a > -back && a < len + 20) return c; } return null; }
+function nextCorner(s) { let best = null, bd = 1e9; for (const c of corners) { const d = S.wrap(c.entry - s); if (d < bd) { bd = d; best = c; } } return [best, bd]; }
+function coachTick(dt) {
+  if (!coach || !race) return;
+  coach.t += dt * timeScale;
+  if (coach.cur && coach.t > coach.until) { coachEl.classList.remove('on'); coach.cur = null; coach.lastEnd = coach.t; }
+  if (!cfg.coach || state !== 'race') return;
+  const p = race.player; if (p.finished) return;
+  const s = S.wrap(p.dist), road = S.INFO.kind === 'road', lap = S.lapOf(p) || 1;
+  if (race.phase === 'pace') {
+    const tg = (race.greenAt - race.paceLeader) / S.INFO.paceV;
+    if (race.t > 3.5 && tg > 5 && !coach.paceSaid) { if (coachSay('pace', road ? 'Brake when the BRAKE button glows' : 'Hold your spot. Go on the green', 30, 2.4, 99)) coach.paceSaid = 1; }
+    else if (tg < 3.2 && tg > 2.2) coachSay('ready', 'Get ready…', 40, 1.6, 99);
+    return;
+  }
+  // spotter on? then no "move over" advice toward that side
+  const sideBusy = (dir) => { for (const c of race.cars) { if (c === p) continue; const g = relS(c.dist, p.dist); if (Math.abs(g) < 9 && Math.sign(c.d - p.d) === dir && Math.abs(c.d - p.d) < 5) return true; } return false; };
+  if (p.spin) return;
+  if (road) {
+    // slide: warn, then remind once it's caught
+    if (p.slip > 0.25 || p.slipR > 1.16) { coach.slid = Math.max(coach.slid, p.slip + 0.3); coach.calmT = 0; if (!input.brake) coachSay('slide', 'Sliding! Lift and catch it', 85, 1.3, 3); }
+    else if (coach.slid > 0) { coach.calmT += dt; if (coach.calmT > 0.5) { coachSay('smooth', 'Smooth on the throttle', 80, 1.6, 8); coach.slid = 0; } }
+    const [c, dist] = nextCorner(s);
+    if (c) {
+      const key = c.id + ':' + lap;
+      // brake call ~0.45 s before the BRAKE button lights, so a thumb has time to get there
+      if (c.brake && !input.brake && S.brakeSoon(p, 0.45) && dist < 260 && !coach.done['b' + key]) {
+        const t = coach.trouble[c.id];
+        if (coachSay('brake', t ? 'Brake now. Earlier than last lap' : (c.vmin < 30 ? 'Brake now!' : 'Brake'), 100, 1.2, 1.5)) coach.done['b' + key] = 1;
+      }
+      // line: set up on the outside before the big corners
+      const want = c.sign < 0 ? -1 : 1; // right-hander: come in from the left
+      if (c.big && dist > p.v * 1.4 && dist < p.v * 3.2 && !coach.done['l' + key]) {
+        const tgt = want * 4.0;
+        if (Math.abs(p.d - tgt) > 4.6 && !sideBusy(want)) { if (coachSay('line', want < 0 ? 'Move left for a better line' : 'Move right for a better line', 45, 1.6, 10)) coach.done['l' + key] = 1; }
+      }
+    }
+    // turn in / apex / track out for the big corners: first two laps, or where you got it wrong last time
+    const cc = cornerAt(s, 30);
+    if (cc && cc.big && (lap <= 2 || coach.trouble[cc.id])) {
+      const k2 = cc.id + ':' + lap, a = relS(s, cc.entry), toApex = relS(cc.apex, s), toExit = relS(cc.exit, s);
+      if (a > -p.v * 0.35 && a < 4 && !coach.done['i' + k2]) { if (coachSay('turnin', 'Turn in', 40, 0.9, 1.5)) coach.done['i' + k2] = 1; }
+      else if (toApex < p.v * 0.25 && toApex > -4 && !coach.done['a' + k2]) { if (coachSay('apex', 'Apex. Clip the kerb', 40, 1.0, 1.5)) coach.done['a' + k2] = 1; }
+      else if (toExit < p.v * 0.3 && toExit > -10 && !coach.done['o' + k2]) { if (coachSay('out', 'Track out. Power on', 40, 1.0, 1.5)) { coach.done['o' + k2] = 1; if (coach.trouble[cc.id] && coach.trouble[cc.id] > 0) coach.trouble[cc.id]--; } }
+    }
+  } else {
+    // ovals: draft and pass, the line through the turns, the wall
+    let ahead = null, ag = 1e9;
+    for (const o of race.cars) { if (o === p) continue; const g2 = S.wrap(o.dist - p.dist); if (g2 > 4 && g2 < 80 && Math.abs(o.d - p.d) < 2.4 && g2 < ag) { ahead = o; ag = g2; } }
+    if (ahead && p.draft > 0.45 && ag < 18 && p.v > ahead.v + 0.5) {
+      const din2 = S.dIn(s), dout2 = S.dOut(s);
+      const hiRoom = ahead.d + 3.3 < dout2 - 1 && !sideBusy(1), loRoom = ahead.d - 3.3 > din2 + 1 && !sideBusy(-1);
+      if (hiRoom || loRoom) coachSay('pull', 'Pull out now! Go ' + (loRoom && (!hiRoom || p.d < S.lineAt(s)) ? 'low' : 'high'), 65, 1.5, 5);
+    } else if (ahead && p.draft > 0.3 && ag > 22) coachSay('draft', 'In the draft. Stay tucked in…', 55, 1.6, 14);
+    const F = S.turnF(s), Fa = S.turnF(s + p.v * 1.6);
+    if (F > 0.6 && p.d > S.lineAt(s) + 3.5) { coach.highT += dt; if (coach.highT > 1.0) coachSay('low', 'Go low. Hug the bottom of the turn', 45, 1.6, 12); } else coach.highT = 0;
+    if (F < 0.15 && Fa > 0.5 && p.d < S.lineAt(s) - 4 && !sideBusy(1)) coachSay('up', 'Move up. Set up high for the turn', 45, 1.6, 12);
+    if (F > 0.3 && p.d > S.wallOut(s) - 2.6 && p.latV > 1.2 && !input.brake) coachSay('lift', 'Lift! Wall!', 95, 1.0, 3);
+  }
+  // encouragement on a pass
+  const pos = S.positionOf(race, p);
+  if (coach.lastPos && pos < coach.lastPos && coach.t - coach.posT > 1.2 && race.raceT > 4) coachSay('pass', 'Nice pass! P' + pos, 25, 1.3, 7);
+  if (pos !== coach.lastPos) { coach.lastPos = pos; coach.posT = coach.t; }
+}
+
+// ---------------- pre-race yellow, then green ----------------
+const flagbar = $('flagbar'), flagTxt = $('flagTxt'), flagSub = $('flagSub');
+let flagPhase = '';
+function updateStartFlags() {
+  if (!race) return;
+  if (race.phase === 'pace') {
+    const tg = Math.max(0, (race.greenAt - race.paceLeader) / S.INFO.paceV);
+    if (flagPhase !== 'yellow') { flagPhase = 'yellow'; flagbar.className = 'flagbar yellow on'; flagTxt.textContent = 'YELLOW FLAG'; setFlag('yellow'); }
+    flagSub.textContent = tg > 3 ? 'Field coming to the green' : 'Green in ' + Math.ceil(tg) + '…';
+    flagbar.classList.toggle('soon', tg <= 3);
+  } else if (flagPhase === 'yellow') {
+    flagPhase = 'green'; flagbar.className = 'flagbar green on'; flagTxt.textContent = 'GREEN  GREEN  GREEN!'; flagSub.textContent = ''; setFlag('green');
+    setTimeout(() => { if (flagPhase === 'green') { flagbar.classList.remove('on'); flagPhase = 'off'; } }, 2600);
+  }
+  if (race.player && flagState !== 'checker') {
+    const lap = S.lapOf(race.player);
+    if (race.phase === 'green' && lap >= race.opts.laps) setFlag('white');
+    if (race.finishers > 0) setFlag('checker');
+  }
+}
+
 // ---------------- frame ----------------
 const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), camUp = new THREE.Vector3(0, 1, 0);
-let shake = 0, lastPos = 0, perf = { acc: 0, n: 0, t: 0 }, spotT = 0, hudT = 0, mapT = 0, camPsi = 0;
+let shake = 0, lastPos = 0, perf = { acc: 0, n: 0, t: 0 }, spotT = 0, hudT = 0, mapT = 0, camPsi = 0, spinCam = 0;
 function updateScene(dt) {
   if (!race) return;
   // cars
   race.cars.forEach((c, i) => {
-    carFrame(c.dist, c.d, c.psi, tmpF);
+    carFrame(c.dist, c.d, c.psi + (c.yaw || 0), tmpF);
     setInstance(bodyMesh, i, tmpF); setInstance(accMesh, i, tmpF);
     vT.copy(tmpF.fwd).negate(); M4.makeBasis(tmpF.right, tmpF.up, vT); M4.setPosition(tmpF.pos.x + tmpF.up.x * 0.04, tmpF.pos.y + tmpF.up.y * 0.04, tmpF.pos.z + tmpF.up.z * 0.04); shMesh.setMatrixAt(i, M4);
   });
@@ -783,14 +1051,22 @@ function updateScene(dt) {
   }
   camPsi += (p.psi * 0.55 - camPsi) * (1 - Math.exp(-dt * 6));
   carFrame(p.dist, p.d, camPsi, camF);
+  // during a spin the camera eases up and back to a chase view and keeps following the direction of travel (not the
+  // car's rotation), so you watch the car come round in front of you; in-car views rise first, so nothing clips
+  const spinning = !!p.spin;
+  spinCam += ((spinning ? 1 : 0) - spinCam) * (1 - Math.exp(-dt * (spinning ? 3.2 : 1.4)));
   const setups = [[7.6, 2.35, 14, 0.9], [4.6, 1.55, 18, 0.95], [-0.4, 1.05, 30, 0.95]];
-  const [back, up, ahead, look] = setups[camMode];
+  let [back, up, ahead, look] = setups[camMode];
+  if (spinCam > 0.001) {
+    const eu = Math.sqrt(spinCam), eb = camMode === 2 ? spinCam * spinCam : spinCam;
+    back += (8.2 - back) * eb; up += (4.6 - up) * eu; ahead += (2 - ahead) * spinCam; look += (0.3 - look) * spinCam;
+  }
   camPos.copy(camF.pos).addScaledVector(camF.fwd, -back).addScaledVector(camF.up, up);
   camLook.copy(camF.pos).addScaledVector(camF.fwd, ahead).addScaledVector(camF.up, look);
   if (shake > 0) { shake -= dt; camPos.x += (Math.random() - 0.5) * shake * 0.6; camPos.y += (Math.random() - 0.5) * shake * 0.6; }
   camUp.set(0, 1, 0).lerp(camF.up, 0.7);
   camera.position.copy(camPos); camera.up.copy(camUp); camera.lookAt(camLook);
-  const aspect = camera.aspect, hfov = 82 + (p.v / 104) * 6 + p.draft * 5;
+  const aspect = camera.aspect, hfov = (82 + (p.v / 104) * 6 + p.draft * 5) * (1 - spinCam) + 64 * spinCam;
   let vfov = 2 * Math.atan(Math.tan(hfov * Math.PI / 360) / aspect) * 180 / Math.PI; vfov = clamp(vfov, 46, 88);
   camera.fov = vfov; camera.updateProjectionMatrix();
 }
@@ -815,11 +1091,13 @@ function updateHUD(dt) {
 
 function handleEvents() {
   for (const e of race.events) {
-    if (e.type === 'green') { showBanner('GREEN  GREEN  GREEN!', 'green', 2.2); setTimeout(() => hint.classList.remove('on'), 4000); theme.volume = 0.0; playTheme(false); }
-    else if (e.type === 'wall' && e.car === race.player.id) { shake = 0.25 + Math.min(0.4, e.impact * 0.1); carFrame(race.player.dist, race.player.d + (e.inside ? -1 : 1), 0, tmpF); spawnSparks(tmpF.pos.x, tmpF.pos.y + 0.3, tmpF.pos.z, tmpF.fwd.x * race.player.v * 0.8, tmpF.fwd.z * race.player.v * 0.8, 24); if (navigator.vibrate) navigator.vibrate(30); }
+    if (e.type === 'green') { if (!flagbar.classList.contains('on')) showBanner('GREEN  GREEN  GREEN!', 'green', 2.2); setTimeout(() => hint.classList.remove('on'), 4000); theme.volume = 0.0; playTheme(false); }
+    else if (e.type === 'wall' && e.car === race.player.id) { shake = 0.25 + Math.min(0.4, e.impact * 0.1); carFrame(race.player.dist, race.player.d + (e.inside ? -1 : 1), 0, tmpF); spawnSparks(tmpF.pos.x, tmpF.pos.y + 0.3, tmpF.pos.z, tmpF.fwd.x * race.player.v * 0.8, tmpF.fwd.z * race.player.v * 0.8, 24); if (navigator.vibrate) navigator.vibrate(30); coachEvent(e); }
     else if ((e.type === 'bump' || e.type === 'rub')) { shake = Math.max(shake, 0.12); }
-    else if (e.type === 'spin' && e.car === race.player.id) { showBanner('SPUN! BRAKE EARLIER', 'gold', 1.8); shake = 0.5; if (navigator.vibrate) navigator.vibrate(60); }
+    else if (e.type === 'spin' && e.car === race.player.id) { showBanner('SPIN!', 'gold', 1.4); if (navigator.vibrate) navigator.vibrate([40, 60, 40]); coachEvent(e); }
+    else if (e.type === 'spinEnd' && e.car === race.player.id) coachEvent(e);
     else if (e.type === 'lap') {
+      coachEvent(e);
       const p = race.player, left = race.opts.laps - e.lap;
       const best = p.bestLap === e.time; if (best) saveBest(S.INFO.id, e.time);
       if (left === 1) showBanner('WHITE FLAG · FINAL LAP', 'white', 2.2);
@@ -874,13 +1152,14 @@ function frame(ts) {
     for (let left = dtRaw * timeScale; left > 1e-6; left -= 0.1) S.stepRace(race, Math.min(0.1, left), input);
     handleEvents();
     updateHUD(dtRaw);
+    coachTick(dtRaw); updateStartFlags(); updateSkids(dtRaw);
     mapT -= dtRaw; if (mapT <= 0) { drawMap(); mapT = 0.1; }
     const p = race.player;
     engineSound(p.v, race.phase !== 'pace' || true, p.draft);
     if (race.playerFinished && state === 'race' && finishShown) state = 'done';
   }
   if (msgT > 0) { msgT -= dtRaw; if (msgT <= 0) banner.classList.remove('on'); }
-  if (race) updateScene(dtRaw); else idleCam(ts / 1000);
+  if (race) { updateScene(dtRaw); updateFlag(ts / 1000); } else idleCam(ts / 1000);
   drawConfetti(dtRaw);
   renderer.render(scene, camera);
 }
@@ -892,7 +1171,7 @@ function idleCam(t) {
 }
 
 // ---------------- boot ----------------
-window.KTB = { S, get state() { return state; }, race: null, fps: 0, startRace, applyTrack, buildTrackCards, setTimeScale: (x) => { timeScale = x; }, renderer };
+window.KTB = { S, camera, get standAt() { return standAt; }, get state() { return state; }, race: null, fps: 0, coachLog: [], coachSay: (...a) => coachSay(...a), get coachCfg() { return cfg.coach; }, startRace, applyTrack, buildTrackCards, setTimeScale: (x) => { timeScale = x; }, renderer };
 applyTrack(cfg.track);
 bodyMesh.count = accMesh.count = 0; shMesh.count = 0;
 resize(); syncSettings();

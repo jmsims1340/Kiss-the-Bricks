@@ -163,6 +163,44 @@ test('Indy road course: laps count, braking matters, and skipping the brakes cos
   S.setTrack('indy');
 });
 
+test('road course handling: a late braker is forgiven, the spin is one smooth decaying turn, and the car comes back', () => {
+  // a human-ish driver: sees the BRAKE cue 0.4 s late and lets go as soon as it goes out
+  let since = -1, t = 0;
+  const late = (r) => { t += 1 / 60; const p = r.player, cue = r.phase === 'green' && S.needBrake(p); if (cue && since < 0) since = t; if (!cue) since = -1; const a = S.autopilotInput(r, p); a.brake = cue && t - since > 0.4 ? 1 : 0; return a; };
+  const L2 = S.createRace({ track: 'road', laps: 2, seed: 4, field: 2, grid: 1 }); let spins = 0, tt = 0;
+  while (!L2.playerFinished && tt < 400) { S.stepRace(L2, 1 / 60, late(L2)); tt += 1 / 60; for (const e of L2.events) if (e.type === 'spin' && e.car === L2.player.id) spins++; L2.events.length = 0; }
+  assert.ok(L2.playerFinished); assert.equal(spins, 0, 'braking 0.4 s late should slide, not spin');
+  // a spin: no jumps in position, heading or speed; one full turn; the car ends pointing down the track and drives on
+  const r = S.createRace({ track: 'road', laps: 3, seed: 2, field: 2, grid: 1 });
+  while (r.raceT < 4) S.stepRace(r, 1 / 60, S.autopilotInput(r, r.player));
+  const p = r.player; S.forceSpin(r, 1);
+  let prev = { dist: p.dist, d: p.d, h: p.psi + p.yaw, v: p.v }, n = 0, maxJump = 0, maxTurn = 0, maxDv = 0, total = 0;
+  while (p.spin && n < 600) {
+    S.stepRace(r, 1 / 60, { steer: 0, brake: 0 }); n++;
+    const h = p.psi + p.yaw;
+    maxJump = Math.max(maxJump, Math.hypot(p.dist - prev.dist, p.d - prev.d) * 60 - prev.v);
+    let dh = h - prev.h; dh -= Math.round(dh / (2 * Math.PI)) * 2 * Math.PI; // the same heading, one turn apart, is no jump
+    maxTurn = Math.max(maxTurn, Math.abs(dh)); total += dh; maxDv = Math.max(maxDv, prev.v - p.v);
+    prev = { dist: p.dist, d: p.d, h, v: p.v };
+  }
+  assert.ok(n > 100 && n < 220, 'spin lasts ~2-3.5 s: ' + n);
+  assert.ok(Math.abs(Math.abs(total) - 2 * Math.PI) < 0.35, 'about one full turn: ' + total);
+  assert.ok(maxTurn < 0.2, 'no heading snap per frame: ' + maxTurn);
+  assert.ok(maxDv < 0.5, 'speed bleeds off, no sudden cut: ' + maxDv);
+  assert.ok(maxJump < 2, 'no teleport: ' + maxJump);
+  assert.ok(Math.abs(p.yaw) < 0.9, 'ends pointing roughly down the track');
+  const d0 = p.dist; for (let i = 0; i < 300; i++) S.stepRace(r, 1 / 60, S.autopilotInput(r, p));
+  assert.ok(p.dist - d0 > 40 && !p.spin, 'drives away afterwards');
+  S.setTrack('indy');
+});
+
+test('coach and yellow-flag start are wired into the page', () => {
+  assert.match(html, /id="coach"/); assert.match(html, /data-key="coach"/); assert.match(html, /data-key="coachVoice"/);
+  assert.match(html, /id="flagbar"/); assert.match(html, /YELLOW FLAG/);
+  const game = readFileSync(path.join(site, 'game.js'), 'utf8');
+  assert.match(game, /coach: true, coachVoice: false/);
+});
+
 test('track switching restores the Indianapolis oval', () => {
   S.setTrack('road'); assert.ok(S.L > 4000 && S.INFO.kind === 'road');
   S.setTrack('indy'); assert.ok(Math.abs(S.L - 2.5 * 1609.344) < 1); assert.equal(S.S_LINE, 610);

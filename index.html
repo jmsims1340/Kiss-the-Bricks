@@ -38,6 +38,12 @@
   </div>
   <div id="spotL" class="spot left">&#9664; CAR LOW</div>
   <div id="spotR" class="spot right">CAR HIGH &#9654;</div>
+  <div id="flagbar" class="flagbar" role="status" aria-live="polite">
+    <div class="lights" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="flagrow"><span class="flagicon" aria-hidden="true"></span><b id="flagTxt">YELLOW FLAG</b></div>
+    <div id="flagSub" class="flagsub">Field coming to the green</div>
+  </div>
+  <div id="coach" class="coach" aria-live="polite"><span class="cbadge">COACH</span><span id="coachTxt"></span></div>
   <div id="banner" class="banner"></div>
   <div id="hint" class="hint"></div>
   <button id="btnPause" class="hudbtn pausebtn" aria-label="Pause">II</button>
@@ -78,6 +84,8 @@
     <div class="set"><span>Opponents</span><div class="seg" data-key="difficulty"><button data-v="rookie">Rookie</button><button data-v="pro">Pro</button><button data-v="veteran">Veteran</button></div></div>
     <div class="set"><span>Start from</span><div class="seg" data-key="grid"><button data-v="3">P3</button><button data-v="11">P11</button><button data-v="22">P22</button><button data-v="33">P33</button></div></div>
     <div class="set"><span>Field size</span><div class="seg" data-key="field"><button data-v="33">33 cars</button><button data-v="22">22</button><button data-v="11">11</button></div></div>
+    <div class="set"><span>Coach</span><div class="seg" data-key="coach"><button data-v="true">On</button><button data-v="false">Off</button></div></div>
+    <div class="set"><span>Coach voice</span><div class="seg" data-key="coachVoice"><button data-v="true">On</button><button data-v="false">Off</button></div></div>
     <div class="set"><span>Sound</span><div class="seg" data-key="sound"><button data-v="true">On</button><button data-v="false">Off</button></div></div>
     <p id="tiltNote" class="note"></p>
     <button id="btnSetDone" class="big">Done</button>

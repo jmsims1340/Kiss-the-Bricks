@@ -292,7 +292,7 @@ export function createRace(o = {}) {
       dist: leaderDist - row * ROW_GAP, d: slotD, slotD, row, psi: 0, v: INFO.paceV, latV: 0,
       draft: 0, wall: 0, wallHit: 0, onApron: false, finished: false, finishTime: 0, finishPos: 0,
       lapStart: null, lastLap: 0, bestLap: 0, laps: 0, passSide: 0, passTarget: -1, passTimer: 0, thinkT: R() * 0.1,
-      tgtD: slotD, sideNear: 0,
+      tgtD: slotD, sideNear: 0, yaw: 0, yawRate: 0, slip: 0, slipR: 0, recover: 0, spin: null, skid: 0, slide: 0,
     });
   }
   return {
@@ -361,24 +361,74 @@ export function autopilotInput(race, c, look = 0.45) {
 
 // true when the car is carrying more speed than it can brake down from for what's coming (the HUD's BRAKE cue)
 export function needBrake(c) { return INFO.kind === 'road' && c.v > safeSpeedAt(wrap(c.dist) + c.v * 0.25) + 1.5; }
+// the same test looking a little further ahead: true `lead` seconds before the BRAKE cue lights (the coach's early call)
+export function brakeSoon(c, lead) { return INFO.kind === 'road' && c.v > safeSpeedAt(wrap(c.dist) + c.v * (0.25 + lead)) + 1.5; }
+// debugging / screenshots: spin the player now
+export function forceSpin(race, dir = 1) { const c = race.player; if (!c.spin) startSpin(race, c, dir); }
 
 export function steerMax(v) { return 0.068 + 0.26 * clamp(1 - v / 55, 0, 1); }
 
+// Road-course handling. r = cornering demand / grip. Past 1 the car slides: it runs a little wide, scrubs speed and
+// the tail steps out (a warning you can feel and see). A spin takes a big, sustained overshoot: the slip meter only
+// fills past spinR and drains fast when you lift or brake, so catching a slide works and a missed brake zone doesn't.
+export const HANDLING = { slideWide: 0.3, scrub: 0.6, scrubK: 1.5, scrubCap: 0.45, tcR: 0.99, falloff: 0.12, punt: 16, spinDecel: 11, spinDrag: 0.17, spinCarry: 0.75, spinR: 1.25, fill: 3.2, drain: 0.9, drainLift: 2.6, liftGrip: 1.08, assistFill: 0.7, liftFill: 0.45 };
+const SPIN_TURN = 2 * Math.PI;
+
+function startSpin(race, c, dir) {
+  const T = clamp(1.6 + c.v / 30, 2.0, 3.2);
+  c.spin = { t: 0, T, dir, y0: c.yaw || 0, v0: c.v };
+  c.slip = 0;
+  race.events.push({ type: 'spin', car: c.id, t: race.t, v: c.v, dir, s: wrap(c.dist) });
+}
+// One full, decaying rotation: the tail whips round, the rotation bleeds off and the car settles facing the right way,
+// still rolling, sliding and scrubbing speed the whole time (no speed cap, no jump in position).
+function stepSpin(race, c, dt, k, s) {
+  const sp = c.spin; sp.t += dt;
+  const x = Math.min(1, sp.t / sp.T), e = 1 - Math.pow(1 - x, 2.3);
+  // the car carries on roughly where it was pointed: as the track bends away it drifts across, toward the outside
+  c.psi = clamp(c.psi + k * c.v * dt * HANDLING.spinCarry - c.psi * dt * 0.7, -0.9, 0.9);
+  // heading = psi + yaw ends exactly one turn round, pointing down the track
+  const end = sp.dir * SPIN_TURN - c.psi;
+  c.yaw = sp.y0 + (end - sp.y0) * e;
+  c.yawRate = (end - sp.y0) * 2.3 * Math.pow(1 - x, 1.3) / sp.T;
+  const off = c.d > dOut(s) + 1.0 || c.d < dIn(s) - 1.0;
+  c.v = Math.max(0, c.v - (HANDLING.spinDecel + HANDLING.spinDrag * c.v + (off ? 5 : 0)) * dt);
+  c.latV = c.v * Math.sin(c.psi);
+  c.d += c.latV * dt;
+  c.dist += c.v * Math.cos(c.psi) / (1 + k * c.d) * dt;
+  c.skid = clamp(c.v / 25, 0.3, 1) * (1 - 0.6 * x * x);
+  if (x >= 1) { c.spin = null; c.yaw = sp.dir * SPIN_TURN - c.psi - sp.dir * SPIN_TURN; c.yawRate = 0; c.recover = 1.4; race.events.push({ type: 'spinEnd', car: c.id, t: race.t }); }
+}
+
 function stepPlayer(race, c, dt, inp) {
   const s = wrap(c.dist), k = kappaAt(s), din = dIn(s), dout = dOut(s);
+  const road = INFO.kind === 'road', H = HANDLING;
+  if (c.yaw === undefined) { c.yaw = 0; c.slip = 0; c.recover = 0; c.spin = null; c.skid = 0; c.slipR = 0; }
+  if (c.spin) { c.slide = 0; stepSpin(race, c, dt, k, s); walls(race, c, dt, s); return; }
+  if (c.recover) c.recover = Math.max(0, c.recover - dt);
   const u = clamp(inp.steer || 0, -1, 1);
   const psiT = u * steerMax(c.v);
   c.psi += (psiT - c.psi) * (1 - Math.exp(-dt / 0.11));
   // longitudinal
   const vmax = vMaxFor(race, c);
   const thr = race.opts.autoThrottle ? (inp.brake ? 0 : 1) : (inp.throttle ? 1 : 0);
+  const lifting = !!inp.brake || !thr;
+  let grip = 0, demand = 0, r = 0;
+  if (road) {
+    grip = gripAt(c.v) * (lifting ? H.liftGrip : 1) * (c.recover ? 1.12 : 1);
+    demand = Math.abs(k) * c.v * c.v; r = demand / grip;
+  }
   let a;
   if (inp.brake) a = -brakeDecel(INFO, c.v);
-  else if (thr) a = ACC * (1 - (c.v / vmax) * (c.v / vmax)) * (c.v > vmax ? 0.8 : 1);
+  else if (thr) {
+    a = ACC * (1 - (c.v / vmax) * (c.v / vmax)) * (c.v > vmax ? 0.8 : 1);
+    if (c.recover && a > 0) a *= 0.55;                                            // smooth back on the power after a spin
+    // traction control (auto throttle or assist): don't power the car past the grip it has mid-corner
+    if (road && a > 0 && (race.opts.autoThrottle || race.opts.assist)) a *= clamp((H.tcR - r) / 0.08, 0, 1);
+  }
   else a = -2.2 - 2.2 * (c.v / V_TOP) * (c.v / V_TOP);
   c.v = Math.max(0, c.v + a * dt);
   // lateral: steering, push (understeer) in the turns, light assist
-  const road = INFO.kind === 'road';
   const push = k * c.v * c.v * 0.06;
   let lat = c.v * Math.sin(c.psi) + push;
   if (race.opts.assist) {
@@ -391,17 +441,23 @@ function stepPlayer(race, c, dt, inp) {
     const gi = road ? din + 1.0 : din - 4.2 + 1.0 + 1.5;
     if (c.d < gi && lat < 0) lat *= 1 - clamp((gi - c.d) / 1.5, 0, 1) * (u < -0.6 ? 0.3 : 0.9);
   }
-  // too fast for the corner: the tyres let go, the car runs wide and scrubs speed (assist can't save this)
-  c.slide = 0;
+  // too fast for the corner: the tyres let go, the car runs wide and scrubs speed; a big overshoot spins it
+  c.slide = 0; c.skid = 0; c.slipR = r;
+  let yawT = 0;
   if (road) {
-    const excess = Math.abs(k) * c.v * c.v - gripAt(c.v);
+    const excess = demand - grip * (1 - H.falloff * clamp((r - 1) / 0.5, 0, 1));   // gentle fall-off past the limit
     if (excess > 0) {
-      lat += Math.sign(k) * excess * 0.45; c.v = Math.max(0, c.v - excess * 0.5 * dt); c.slide = excess;
-      // way too fast: it spins
-      if (excess > 0.6 * gripAt(c.v) && !c.spinT) { c.spinT = 1.2; c.v = Math.min(c.v, 14); race.events.push({ type: 'spin', car: c.id, t: race.t }); }
+      lat += Math.sign(k) * excess * H.slideWide * (race.opts.assist ? 0.8 : 1);
+      c.v = Math.max(0, c.v - Math.min(H.scrubCap * grip, excess * (H.scrub + H.scrubK * Math.min(1, r - 1))) * (lifting ? 1.3 : 1) * dt); c.slide = excess;
     }
-    if (c.spinT) { c.spinT = Math.max(0, c.spinT - dt); c.v = Math.min(c.v, 14 + (1.2 - c.spinT) * 4); }
+    if (r > H.spinR && !c.recover) c.slip += dt * (r - H.spinR) * H.fill * (lifting ? H.liftFill : 1) * (race.opts.assist ? H.assistFill : 1);
+    else c.slip = Math.max(0, c.slip - dt * (lifting ? H.drainLift : H.drain));
+    if (c.slip >= 1) { startSpin(race, c, -Math.sign(k) || 1); c.latV = lat; c.d += lat * dt; c.dist += c.v * dt; walls(race, c, dt, s); return; }
+    // the tail steps out as the slide grows (the renderer draws the heading as psi + yaw)
+    if (r > 1.04) yawT = -Math.sign(k) * Math.min(0.34, (r - 1.04) * 0.8 + c.slip * 0.18);
+    c.skid = clamp((r - 1.06) * 2.2 + c.slip * 0.6, 0, 1) * clamp(c.v / 20, 0, 1);
   }
+  c.yaw += (yawT - c.yaw) * (1 - Math.exp(-dt / 0.14));
   c.latV = lat;
   c.d += lat * dt;
   c.dist += c.v * Math.cos(c.psi) / (1 + k * c.d) * dt;
@@ -523,7 +579,13 @@ function contacts(race) {
     const latOverlap = CAR_W - Math.abs(dd), lonOverlap = CAR_LEN - Math.abs(g);
     if (latOverlap > 1.3 * lonOverlap / CAR_LEN * CAR_W || Math.abs(dd) < 0.6) {
       // nose-to-tail: rear car is pushed back and matched to the front car's speed
-      rear.dist -= lonOverlap; if (rear.v > front.v) { const dv = rear.v - front.v; rear.v = front.v - 0.3; front.v += dv * 0.15; }
+      rear.dist -= lonOverlap;
+      if (rear.v > front.v) {
+        const dv = rear.v - front.v;
+        // a big hit from behind on the road course spins the player round instead of using the car ahead as a brake
+        if (rear.isPlayer && !rear.spin && INFO.kind === 'road' && dv > HANDLING.punt && race.phase === 'green') { rear.v = front.v + dv * 0.25; front.v += dv * 0.15; rear.yaw = rear.yaw || 0; startSpin(race, rear, dd >= 0 ? -1 : 1); }
+        else { rear.v = front.v - 0.3; front.v += dv * 0.15; }
+      }
       if (rear.isPlayer || front.isPlayer) race.events.push({ type: 'bump', t: race.t });
     } else {
       // side contact: shove apart, small scrub
