@@ -1015,7 +1015,8 @@ function updateScene(dt) {
   if (!race) return;
   // cars
   race.cars.forEach((c, i) => {
-    carFrame(c.dist, c.d, c.psi + (c.yaw || 0), tmpF);
+    // winner turns to face the camera on the bricks
+    carFrame(c.dist, c.d, c.psi + (c.yaw || 0) + (state === 'win' && c.isPlayer ? Math.PI : 0), tmpF);
     setInstance(bodyMesh, i, tmpF); setInstance(accMesh, i, tmpF);
     vT.copy(tmpF.fwd).negate(); M4.makeBasis(tmpF.right, tmpF.up, vT); M4.setPosition(tmpF.pos.x + tmpF.up.x * 0.04, tmpF.pos.y + tmpF.up.y * 0.04, tmpF.pos.z + tmpF.up.z * 0.04); shMesh.setMatrixAt(i, M4);
   });
