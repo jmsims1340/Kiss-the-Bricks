@@ -1,299 +1,121 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#0a4d0a">
+<meta name="apple-mobile-web-app-title" content="Kiss the Bricks">
+<meta name="theme-color" content="#0b0b0b">
+<meta name="description" content="Kiss the Bricks — a 33-car IndyCar racer: the Indianapolis oval, Texas Motor Speedway and the Indy road course. Draft, pass, and kiss the bricks.">
 <title>Kiss the Bricks</title>
-<link rel="apple-touch-icon" href="apple-touch-icon.PNG">
-<style>
-html,body{margin:0;height:100%;background:#111;overflow:hidden;position:fixed;touch-action:none}
-canvas{display:block}
-</style>
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<canvas id="c"></canvas>
-<script>
-const cv=document.getElementById('c'),ctx=cv.getContext('2d');
-const isTouch='ontouchstart' in window;
-function fit(){cv.width=innerWidth;cv.height=innerHeight}
-fit();addEventListener('resize',fit);
-const titleImg=new Image();titleImg.src='title.PNG';
-const theme=new Audio('theme.caf');theme.loop=true;theme.volume=0.35;
-const S=650,R=280,W=75,P=4*S+2*Math.PI*R,START=250,LAPS=10;
-const VMAX=520,ACC=230,BRK=520,TURN=2.0,GRIP=14,MPHK=235/VMAX;
-function posAt(s){
-s=((s%P)+P)%P;
-if(s<2*S)return{x:-S+s,y:R,tx:1,ty:0};
-if(s<2*S+Math.PI*R){const t=Math.PI/2-(s-2*S)/R;
-return{x:S+R*Math.cos(t),y:R*Math.sin(t),tx:Math.sin(t),ty:-Math.cos(t)}}
-if(s<4*S+Math.PI*R){const u=s-2*S-Math.PI*R;
-return{x:S-u,y:-R,tx:-1,ty:0}}
-const t=-Math.PI/2-(s-4*S-Math.PI*R)/R;
-return{x:-S+R*Math.cos(t),y:R*Math.sin(t),tx:Math.sin(t),ty:-Math.cos(t)}
-}
-function proj(x,y){
-if(x>=-S&&x<=S){
-if(y>=0)return{s:x+S,d:y-R};
-return{s:2*S+Math.PI*R+(S-x),d:-y-R}
-}
-if(x>S){const t=Math.atan2(y,x-S);
-return{s:((2*S+(Math.PI/2-t)*R)%P+P)%P,d:Math.hypot(x-S,y)-R}}
-const t=Math.atan2(y,x+S);
-let u=-Math.PI/2-t;if(u<0)u+=2*Math.PI;
-return{s:((4*S+Math.PI*R+u*R)%P+P)%P,d:Math.hypot(x+S,y)-R}
-}
-function capsule(r){const p=new Path2D();
-p.moveTo(-S,-r);p.lineTo(S,-r);p.arc(S,0,r,-Math.PI/2,Math.PI/2);
-p.lineTo(-S,r);p.arc(-S,0,r,Math.PI/2,Math.PI*1.5);p.closePath();return p}
-const outerP=capsule(R+W),innerP=capsule(R-W);
-let state='ready',cd=0,raceTime=0,keys={},player,ais;
-const touch={left:false,right:false,gas:false,brake:false};
-function bs(){return Math.min(150,cv.width*0.22,(cv.width-80)/4)}
-function zone(x,y){
-const b=bs(),h=cv.height;
-if(y>h-b-40){
-if(x>cv.width-20-b)return'brake';
-if(x>cv.width-20-2*b-14)return'brake';
-}
-return null
-}
-function readTouches(e){
-touch.brake=false;
-for(const t of e.touches){const z=zone(t.clientX,t.clientY);if(z)touch[z]=true}
-readWheel(e)
-}
-function tapAction(){
-if(state==='ready'){state='count';cd=3.2}
-else if(state==='done'){reset()}
-}
-cv.addEventListener('touchstart',e=>{e.preventDefault();initAudio();
-const m=e.changedTouches[0];
-if(m&&m.clientX>cv.width-90&&m.clientY<90){setMute(!muted)}
-else{readTouches(e);tapAction()}},{passive:false});
-cv.addEventListener('touchmove',e=>{e.preventDefault();readTouches(e)},{passive:false});
-cv.addEventListener('touchend',e=>{e.preventDefault();readTouches(e)},{passive:false});
-cv.addEventListener('touchcancel',e=>{e.preventDefault();readTouches(e)},{passive:false});
-function place(c,s0,lat){
-c.s=s0;c.lat=lat;c.tlat=lat;c.v=0;c.lap=0;c.sp=((s0-START)%P+P)%P;c.prevSp=c.sp;
-const n=posAt(s0),nx=-n.ty,ny=n.tx;
-c.x=n.x+nx*lat;c.y=n.y+ny*lat;c.a=Math.atan2(n.ty,n.tx);c.best=0;c.lt=0
-}
-function reset(){
-state='ready';raceTime=0;
-player={col:'#f2b632',isP:true};
-ais=[{col:'#d0312d',vt:445},{col:'#1f6fd6',vt:460},{col:'#e8e8e8',vt:475}];
-let g=START-60,lat=-18;
-for(const a of ais){place(a,g,lat);g-=45;lat=-lat}
-place(player,g,lat);
-}
-reset();
-function updPlayer(dt){
-const p=player;
-const L=keys.arrowleft||keys.a,
-Rt=keys.arrowright||keys.d,
-D=keys.arrowdown||keys.s||touch.brake;
-if(!wheelOn)wheelA*=Math.exp(-8*dt);
-if(state==='race'){
-if(D)p.v-=BRK*dt;
-else p.v+=ACC*dt;
-}
-p.v-=p.v*0.25*dt;if(p.v<0)p.v=0;if(p.v>VMAX)p.v=VMAX;
-p.vx=p.vx||0;p.vy=p.vy||0;
-const grip=Math.min(p.v/80,1);
-const sf=1-0.15*(p.v/VMAX);
-const tgt=((L?-1:0)+(Rt?1:0)+wheelA/2.1)*TURN*grip*sf;
-p.steer=p.steer||0;p.steer+=(tgt-p.steer)*Math.min(1,dt*8);
-p.a+=p.steer*dt;
-const fx=Math.cos(p.a),fy=Math.sin(p.a);
-let fwd=p.vx*fx+p.vy*fy,lat=p.vx*fy-p.vy*fx;
-fwd=p.v;lat*=Math.exp(-GRIP*dt);
-p.vx=fwd*fx+lat*fy;p.vy=fwd*fy-lat*fx;
-p.x+=p.vx*dt;p.y+=p.vy*dt;
-const q=proj(p.x,p.y),lim=W-10;
-if(Math.abs(q.d)>lim-8)p.v=Math.min(p.v,260);
-if(Math.abs(q.d)>lim){
-const n=posAt(q.s),nx=-n.ty,ny=n.tx,cl=Math.sign(q.d)*lim;
-p.x=n.x+nx*cl;p.y=n.y+ny*cl;p.v*=0.85
-}
-for(const a of ais){
-const dx=p.x-a.x,dy=p.y-a.y,dd=Math.hypot(dx,dy);
-if(dd<26){p.x+=dx/dd*3;p.y+=dy/dd*3;p.v*=0.97}
-}
-p.prevSp=p.sp;p.sp=((q.s-START)%P+P)%P;
-if(state==='race'){
-if(p.prevSp>P*0.9&&p.sp<P*0.1){
-if(p.lap>=1){const lt=raceTime-p.lt;if(!p.best||lt<p.best)p.best=lt}
-p.lt=raceTime;p.lap++;
-if(p.lap>LAPS){state='done'}
-} else if(p.prevSp<P*0.1&&p.sp>P*0.9&&p.lap>0){p.lap--}
-}
-}
-function updAI(c,dt){
-if(state!=='race')return;
-const slow=(c.s>2*S&&c.s<2*S+Math.PI*R)||(c.s>4*S+Math.PI*R);
-const vt=c.vt*(slow?0.90:1);
-c.v+=(vt-c.v)*Math.min(1,dt*0.8);
-c.s=((c.s+c.v*dt)%P+P)%P;
-if(Math.random()<dt*0.3)c.tlat=-c.tlat;
-c.lat+=(c.tlat-c.lat)*Math.min(1,dt*0.5);
-const n=posAt(c.s),nx=-n.ty,ny=n.tx;
-c.x=n.x+nx*c.lat;c.y=n.y+ny*c.lat;c.a=Math.atan2(n.ty,n.tx);
-c.prevSp=c.sp;c.sp=((c.s-START)%P+P)%P;
-if(c.prevSp>P*0.9&&c.sp<P*0.1)c.lap++;
-}
-function fmt(t){if(!t)return'--:--.--';
-const m=Math.floor(t/60),s=t-m*60;
-return m+':'+(s<10?'0':'')+s.toFixed(2)}
-function drawCar(c){
-ctx.save();ctx.translate(c.x,c.y);ctx.rotate(c.a);
-ctx.fillStyle='#111';
-ctx.fillRect(-14,-12,9,5);ctx.fillRect(-14,7,9,5);
-ctx.fillRect(9,-12,9,5);ctx.fillRect(9,7,9,5);
-ctx.fillStyle=c.col;
-ctx.beginPath();ctx.roundRect(-18,-7,38,14,6);ctx.fill();
-ctx.fillRect(16,-11,4,22);ctx.fillRect(-22,-10,4,20);
-ctx.fillStyle='#222';
-ctx.beginPath();ctx.ellipse(-1,0,7,4,0,0,7);ctx.fill();
-ctx.restore()
-}
-function drawButtons(){
-if(!isTouch)return;
-const w=cv.width,h=cv.height,b=bs(),y=h-b-30;
-ctx.globalAlpha=0.4;
-ctx.fillStyle=touch.brake?'#d0312d':'#666';ctx.fillRect(w-20-2*b-14,y,2*b+14,b);
-ctx.globalAlpha=1;
-ctx.fillStyle='#fff';ctx.textAlign='center';
-ctx.font='bold 30px sans-serif';
-ctx.fillText('BRK',w-20-b-7,y+b/2+11);
-const wp=wheelPos();
-ctx.save();ctx.translate(wp.x,wp.y);ctx.rotate(wheelA);
-ctx.globalAlpha=0.55;ctx.strokeStyle='#f2b632';ctx.lineWidth=10;
-ctx.beginPath();ctx.arc(0,0,wp.r,0,7);ctx.stroke();
-ctx.lineWidth=6;ctx.strokeStyle='#aaa';
-ctx.beginPath();ctx.moveTo(-wp.r,0);ctx.lineTo(wp.r,0);ctx.moveTo(0,-wp.r);ctx.lineTo(0,wp.r);ctx.stroke();
-ctx.fillStyle='#f2b632';
-ctx.beginPath();ctx.arc(0,-wp.r,10,0,7);ctx.fill();
-ctx.restore();
-const mx=w-64,my=24;
-ctx.globalAlpha=0.5;ctx.fillStyle=muted?'#d0312d':'#666';
-ctx.beginPath();ctx.arc(mx,my,26,0,7);ctx.fill();
-ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.font='bold 26px sans-serif';
-ctx.fillText(muted?'X':'M',mx-8,my+9);
-ctx.textAlign='left'
-}
-function draw(){
-ctx.fillStyle='#0a4d0a';ctx.fillRect(0,0,cv.width,cv.height);
-ctx.save();
-const z=0.55;
-ctx.translate(cv.width/2,cv.height/2);ctx.scale(z,z);ctx.translate(-player.x,-player.y);
-ctx.fillStyle='#3a3a3f';ctx.fill(outerP);
-ctx.fillStyle='#0a5c0a';ctx.fill(innerP);
-ctx.strokeStyle='#e8e8e8';ctx.lineWidth=8;ctx.stroke(outerP);
-ctx.strokeStyle='#888';ctx.lineWidth=4;ctx.stroke(innerP);
-ctx.strokeStyle='rgba(255,255,255,0.35)';ctx.lineWidth=3;ctx.beginPath();
-for(let s=0;s<P;s+=44){const a=posAt(s),b=posAt(s+18);
-ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y)}
-ctx.stroke();
-const n=posAt(START);
-ctx.fillStyle='#8b2f2f';
-ctx.fillRect(n.x-26,n.y-W+6,8,2*W-12);
-for(let row=0;row<2;row++)for(let i=-W+10;i<W-10;i+=14){
-ctx.fillStyle=((i/14+row)%2===0)?'#fff':'#111';
-ctx.fillRect(n.x+row*14,n.y+i,14,14)}
-for(const a of ais)drawCar(a);
-drawCar(player);
-ctx.restore();
-const p=player,w=cv.width;
-ctx.fillStyle='#fff';
-ctx.font='bold 26px sans-serif';
-const disp=Math.min(Math.max(p.lap,1),LAPS);
-ctx.fillText('LAP '+disp+'/'+LAPS,20,40);
-let rank=1;for(const a of ais)if(a.lap*P+a.sp>p.lap*P+p.sp)rank++;
-ctx.fillText('P'+rank,20,74);
-ctx.textAlign='right';
-ctx.fillText('LAP  '+fmt(state==='race'?raceTime-p.lt:0),w-20,100);
-ctx.fillText('BEST '+fmt(p.best),w-20,134);
-ctx.textAlign='center';
-ctx.font='bold 56px sans-serif';
-ctx.fillText(Math.round(p.v*MPHK),w/2,66);
-ctx.font='bold 22px sans-serif';
-ctx.fillText('MPH',w/2,92);
-ctx.textAlign='left';
-drawButtons();
-ctx.textAlign='center';
-if(state==='ready'){
-if(titleImg.complete&&titleImg.naturalWidth){
-ctx.drawImage(titleImg,0,0,w,cv.height);
-ctx.fillStyle='rgba(0,0,0,0.45)';ctx.fillRect(0,0,w,cv.height)
-}
-ctx.fillStyle='#fff';
-ctx.font='bold 48px sans-serif';ctx.fillText('KISS THE BRICKS',w/2,cv.height/2-60);
-ctx.font='bold 26px sans-serif';
-ctx.fillText('You start P4. Win it.',w/2,cv.height/2-15);
-ctx.fillText(isTouch?'Tap to start your engine':'Press any key to start',w/2,cv.height/2+25)
-}
-if(state==='count'){
-ctx.font='bold 90px sans-serif';
-ctx.fillText(cd>0?Math.ceil(cd):'GO!',w/2,cv.height/2)
-}
-if(state==='done'){
-ctx.fillStyle='rgba(0,0,0,0.65)';ctx.fillRect(0,0,cv.width,cv.height);
-ctx.fillStyle='#fff';ctx.font='bold 48px sans-serif';
-ctx.fillText('CHECKERED FLAG!',w/2,cv.height/2-50);
-ctx.font='bold 28px sans-serif';
-ctx.fillText('Total: '+fmt(raceTime),w/2,cv.height/2+5);
-ctx.fillText('Best lap: '+fmt(p.best),w/2,cv.height/2+45);
-ctx.fillText('Finish: P'+rank+(isTouch?' Tap to race again':' Press R to race again'),w/2,cv.height/2+85)
-}
-ctx.textAlign='left'
-}
-let ac=null,osc=null,gain=null,muted=false;
-function setMute(v){muted=v;theme.muted=v;if(v){theme.pause()}else{theme.play()}}
-let wheelA=0,wheelOn=false;
-function wheelPos(){const b=bs(),h=cv.height;return{x:110+b/2,y:h-85,r:Math.min(85,b/2+38)}}
-function readWheel(e){
-const wp=wheelPos();wheelOn=false;
-for(const t of e.touches){
-const dx=t.clientX-wp.x,dy=t.clientY-wp.y;
-if(dx*dx+dy*dy<wp.r*wp.r*1.8){
-let rel=Math.atan2(dx,-dy);
-if(rel>2.1)rel=2.1;if(rel<-2.1)rel=-2.1;
-wheelA=rel;wheelOn=true
-}
-}
-}
-function initAudio(){theme.play();if(ac)return;
-ac=new(window.AudioContext||window.webkitAudioContext)();
-osc=ac.createOscillator();osc.type='sawtooth';
-gain=ac.createGain();gain.gain.value=0.03;
-osc.connect(gain);gain.connect(ac.destination);osc.start()}
-function updAudio(){if(!ac)return;
-osc.frequency.value=55+player.v*0.5;
-gain.gain.value=muted?0:0.015+player.v/VMAX*0.03}
-theme.muted=muted
-addEventListener('keydown',e=>{
-if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();
-initAudio();
-const k=e.key.toLowerCase();
-if(k==='m'){setMute(!muted);return}
-if(k==='r'){reset();return}
-keys[k]=true;keys[e.key]=true;
-if(state==='ready'){state='count';cd=3.2}
-});
-addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;keys[e.key]=false});
-let last=0;
-function loop(t){
-const dt=Math.min((t-last)/1000,0.05);last=t;
-if(state==='count'){cd-=dt;if(cd<=0)state='race'}
-if(state==='race')raceTime+=dt;
-updPlayer(dt);
-for(const a of ais)updAI(a,dt);
-updAudio();draw();
-requestAnimationFrame(loop)
-}
-requestAnimationFrame(loop);
-</script>
+<canvas id="gl" aria-label="Race view"></canvas>
+<canvas id="fx" aria-hidden="true"></canvas>
+<div id="bangFlash" aria-hidden="true"></div>
+
+<main id="hud" class="hidden" aria-live="off">
+  <div class="hud-tl">
+    <div class="pos"><span class="lbl">POS</span><b id="hPos">11</b><span id="hField">/33</span></div>
+    <div class="lap"><span class="lbl">LAP</span><b id="hLap">1</b><span id="hLaps">/10</span></div>
+  </div>
+  <div class="hud-tr">
+    <div class="times">
+      <div><span class="lbl">LAP</span><b id="hTime">0:00.0</b></div>
+      <div><span class="lbl">LAST</span><b id="hLast">--</b></div>
+      <div><span class="lbl">BEST</span><b id="hBest">--</b></div>
+    </div>
+    <canvas id="map" width="160" height="80" aria-hidden="true"></canvas>
+  </div>
+  <div class="hud-speed">
+    <div class="mph"><b id="hMph">0</b><span>MPH</span></div>
+    <div class="draft"><i id="hDraft"></i><span>DRAFT</span></div>
+  </div>
+  <div id="spotL" class="spot left">&#9664; CAR LOW</div>
+  <div id="spotR" class="spot right">CAR HIGH &#9654;</div>
+  <div id="flagbar" class="flagbar" role="status" aria-live="polite">
+    <div class="lights" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="flagrow"><span class="flagicon" aria-hidden="true"></span><b id="flagTxt">YELLOW FLAG</b></div>
+    <div id="flagSub" class="flagsub">Field coming to the green</div>
+  </div>
+  <div id="coach" class="coach" aria-live="polite"><span class="cbadge">COACH</span><span id="coachTxt"></span></div>
+  <div id="banner" class="banner"></div>
+  <div id="hint" class="hint"></div>
+  <button id="btnPause" class="hudbtn pausebtn" aria-label="Pause">II</button>
+  <button id="btnCam" class="hudbtn cambtn" aria-label="Change camera">CAM</button>
+  <button id="btnLift" class="pedal lift" aria-label="Lift and brake">LIFT</button>
+  <button id="btnGas" class="pedal gas hidden" aria-label="Throttle">GAS</button>
+  <div id="steerDot" class="steerdot hidden"></div>
+</main>
+
+<section id="title" class="screen title">
+  <img class="art" src="title.jpg" alt="Kiss the Bricks — gold Indy car at the Brickyard">
+  <div class="panel">
+    <h1 class="sr">Kiss the Bricks</h1>
+    <div class="row-label">Race length</div>
+    <div class="seg" id="segLaps" role="radiogroup" aria-label="Race length">
+      <button data-v="5">5 laps</button><button data-v="10">10 laps</button><button data-v="20">20 laps</button>
+    </div>
+    <button id="btnRace" class="big">RACE</button>
+    <button id="btnSettings" class="ghost">Settings</button>
+    <p class="tip">Drag a thumb left/right anywhere to steer. Tuck in behind a car to catch the draft, then pull out and pass.</p>
+  </div>
+</section>
+
+<section id="tracks" class="screen tracks hidden" aria-label="Choose a track">
+  <div class="tpanel">
+    <div class="thead"><button id="btnTrackBack" class="ghost tback" aria-label="Back">&#8249; Back</button><h2>Pick your track</h2></div>
+    <div id="trackList" class="tlist"></div>
+  </div>
+</section>
+
+<section id="settings" class="screen sheet hidden" aria-label="Settings">
+  <div class="card">
+    <h2>Settings</h2>
+    <div class="set"><span>Steering</span><div class="seg" data-key="steer"><button data-v="drag">Thumb drag</button><button data-v="tilt">Tilt phone</button></div></div>
+    <div class="set"><span>Sensitivity</span><div class="seg" data-key="sens"><button data-v="0.7">Low</button><button data-v="1">Medium</button><button data-v="1.4">High</button></div></div>
+    <div class="set"><span>Steering assist</span><div class="seg" data-key="assist"><button data-v="true">On</button><button data-v="false">Off</button></div></div>
+    <div class="set"><span>Throttle</span><div class="seg" data-key="throttle"><button data-v="auto">Auto</button><button data-v="manual">Manual</button></div></div>
+    <div class="set"><span>Opponents</span><div class="seg" data-key="difficulty"><button data-v="rookie">Rookie</button><button data-v="pro">Pro</button><button data-v="veteran">Veteran</button></div></div>
+    <div class="set"><span>Start from</span><div class="seg" data-key="grid"><button data-v="3">P3</button><button data-v="11">P11</button><button data-v="22">P22</button><button data-v="33">P33</button></div></div>
+    <div class="set"><span>Field size</span><div class="seg" data-key="field"><button data-v="33">33 cars</button><button data-v="22">22</button><button data-v="11">11</button></div></div>
+    <div class="set"><span>Coach</span><div class="seg" data-key="coach"><button data-v="true">On</button><button data-v="false">Off</button></div></div>
+    <div class="set"><span>Coach voice</span><div class="seg" data-key="coachVoice"><button data-v="true">On</button><button data-v="false">Off</button></div></div>
+    <div class="set"><span>Sound</span><div class="seg" data-key="sound"><button data-v="true">On</button><button data-v="false">Off</button></div></div>
+    <p id="tiltNote" class="note"></p>
+    <button id="btnSetDone" class="big">Done</button>
+  </div>
+</section>
+
+<section id="pause" class="screen sheet hidden" aria-label="Paused">
+  <div class="card narrow">
+    <h2>Paused</h2>
+    <button id="btnResume" class="big">Resume</button>
+    <button id="btnRestart" class="ghost">Restart race</button>
+    <button id="btnPauseSettings" class="ghost">Settings</button>
+    <button id="btnQuit" class="ghost">Quit to menu</button>
+  </div>
+</section>
+
+<section id="finish" class="screen sheet hidden" aria-label="Race result">
+  <div class="card result">
+    <div class="checker" aria-hidden="true"></div>
+    <div id="fHead" class="fhead">CHECKERED FLAG</div>
+    <div id="fPos" class="fpos">P4</div>
+    <div id="fSub" class="fsub"></div>
+    <ol id="fTable" class="ftable"></ol>
+    <button id="btnKiss" class="big kiss hidden">💋 Kiss the bricks</button>
+    <div class="btnrow"><button id="btnAgain" class="big">Race again</button><button id="btnMenu" class="ghost">Menu</button></div>
+  </div>
+</section>
+
+<div id="loading" class="loading">Loading the track…</div>
+<audio id="theme" src="theme.m4a" loop preload="auto"></audio>
+<script type="module" src="game.js"></script>
 </body>
 </html>
