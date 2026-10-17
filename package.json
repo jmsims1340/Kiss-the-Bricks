@@ -1,0 +1,6 @@
+{
+  "name": "kiss-the-bricks",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test test/game.test.mjs" }
+}
