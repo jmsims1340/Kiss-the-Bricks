@@ -547,10 +547,16 @@ $('btnRestart').addEventListener('click', () => { show('pause', false); startRac
 $('btnQuit').addEventListener('click', () => { show('pause', false); toTitle(); });
 $('btnAgain').addEventListener('click', () => { show('finish', false); startRace(); });
 $('btnMenu').addEventListener('click', () => { show('finish', false); toTitle(); });
-$('btnKiss').addEventListener('click', () => {
-  $('btnKiss').classList.add('hidden'); burst(160);
-  if (S.INFO.bricks) { kissed = true; winCam = 0; $('fSub').innerHTML = 'Smack. A Brickyard tradition. 🥛 Milk is on the way.'; }
-  else { $('fSub').innerHTML = 'Bang! Bang! Cowboy hat on, six-shooters in the air. That\'s how they celebrate in Texas Victory Lane. 🤠'; burst(160); if (navigator.vibrate) navigator.vibrate([40, 60, 40]); }
+// fire on touchend (iOS) or click, never twice for one tap
+function onTap(el, fn) {
+  let last = 0; const go = (e) => { const now = performance.now(); if (now - last < 350) return; last = now; fn(e); };
+  el.addEventListener('touchend', (e) => { if (e.cancelable) e.preventDefault(); go(e); }, { passive: false });
+  el.addEventListener('click', go);
+}
+onTap($('btnKiss'), () => {
+  initAudio(); if (actx && actx.state === 'suspended') actx.resume();
+  if (S.INFO.bricks) { $('btnKiss').classList.add('hidden'); burst(160); kissed = true; winCam = 0; $('fSub').innerHTML = 'Smack. A Brickyard tradition. 🥛 Milk is on the way.'; }
+  else { fireSixShooters(); $('btnKiss').textContent = '🤠 Fire again!'; $('fSub').innerHTML = 'Bang! Bang! Cowboy hat on, six-shooters in the air. That\'s how they celebrate in Texas Victory Lane. 🤠'; }
 });
 $('title').addEventListener('pointerdown', () => { initAudio(); if (state === 'title') playTheme(true); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) { if (state === 'race') togglePause(true); playTheme(false); if (actx) actx.suspend(); } });
@@ -649,11 +655,89 @@ function drawMap() {
 // ---------------- confetti (win) ----------------
 const fx = $('fx'), fctx = fx.getContext('2d'); let conf = [], confOn = false;
 function burst(n) { const w = fx.width, h = fx.height; const cols = ['#f2c230', '#c0573a', '#ffffff', '#d71920', '#1e63c6', '#111']; for (let i = 0; i < n; i++) conf.push({ x: Math.random() * w, y: -20 - Math.random() * h * 0.5, vx: (Math.random() - 0.5) * 60, vy: 80 + Math.random() * 160, r: Math.random() * 6.3, vr: (Math.random() - 0.5) * 8, s: 6 + Math.random() * 8, c: cols[(Math.random() * cols.length) | 0] }); confOn = true; }
-function stopConfetti() { conf = []; confOn = false; fctx.clearRect(0, 0, fx.width, fx.height); }
+function stopConfetti() { conf = []; confOn = false; fxp = []; fctx.clearRect(0, 0, fx.width, fx.height); }
+
+// ---------------- six-shooters (Texas victory lane) ----------------
+let fxp = [], guns = [], shotN = 0;
+const rnd = (a, b) => a + Math.random() * (b - a);
+function bangSound() {
+  if (!actx || !cfg.sound) return;
+  try {
+    const t = actx.currentTime, len = Math.floor(actx.sampleRate * 0.5), buf = actx.createBuffer(1, len, actx.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+    const src = actx.createBufferSource(); src.buffer = buf;
+    const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(7000, t); lp.frequency.exponentialRampToValueAtTime(400, t + 0.35);
+    const g = actx.createGain(); g.gain.setValueAtTime(1.4, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+    src.connect(lp); lp.connect(g); g.connect(actx.destination); src.start(t);
+    const o = actx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(38, t + 0.2);
+    const og = actx.createGain(); og.gain.setValueAtTime(1.2, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+    o.connect(og); og.connect(actx.destination); o.start(t); o.stop(t + 0.3);
+  } catch (e) {}
+}
+function restartAnim(el, cls) { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
+function shot(side) {
+  const k = fx.width / window.innerWidth, w = fx.width, h = fx.height;
+  const gun = guns[side < 0 ? 0 : 1]; gun.kick = 1;
+  const x = gun.x + Math.sin(gun.a) * 95 * k, y = gun.y - Math.cos(gun.a) * 95 * k; // muzzle
+  fxp.push({ t: 'flash', x, y, age: 0, life: 0.2, r: rnd(95, 125) * k, rot: Math.random() * 6.3 });
+  for (let i = 0; i < 7; i++) fxp.push({ t: 'smoke', x: x + rnd(-14, 14) * k, y: y + rnd(-10, 10) * k, vx: rnd(-30, 30) * k + side * 12 * k, vy: rnd(-95, -40) * k, age: 0, life: rnd(1.4, 2.2), r0: rnd(14, 24) * k, r1: rnd(60, 95) * k, g: (rnd(170, 225)) | 0 });
+  for (let i = 0; i < 16; i++) { const a = gun.a + rnd(-0.7, 0.7), v = rnd(320, 760) * k; fxp.push({ t: 'spark', x, y, vx: Math.sin(a) * v, vy: -Math.cos(a) * v, age: 0, life: rnd(0.25, 0.5) }); }
+  fxp.push({ t: 'bang', x: Math.min(w - 90 * k, Math.max(90 * k, x)), y: y - 70 * k, age: 0, life: 0.75, rot: rnd(-0.25, 0.25) });
+  restartAnim($('bangFlash'), 'on'); restartAnim(document.documentElement, 'shake');
+  shake = 0.6; bangSound(); if (navigator.vibrate) navigator.vibrate(35);
+}
+function fireSixShooters() {
+  const k = fx.width / window.innerWidth, w = fx.width, h = fx.height, portrait = h > w;
+  const gy = h * (portrait ? 0.34 : 0.42);
+  guns = [{ x: w * 0.2, y: gy, a: 0.32, kick: 0 }, { x: w * 0.8, y: gy, a: -0.32, kick: 0 }];
+  guns.forEach((g) => { g.age = 0; g.life = 3.4; });
+  for (let i = 0; i < 6; i++) setTimeout(() => shot(i % 2 ? 1 : -1), 60 + i * 230);
+  setTimeout(() => burst(220), 700);
+  confOn = true; shotN++; window.KTB.shots = (window.KTB.shots || 0) + 6;
+}
+function drawGun(g, k) {
+  const a = Math.min(1, g.age * 6, (g.life - g.age) * 3); if (a <= 0) return;
+  fctx.save(); fctx.globalAlpha = a; fctx.translate(g.x, g.y + g.kick * 14 * k); fctx.rotate(g.a - g.kick * 0.35 * Math.sign(g.a || 1)); fctx.scale(1.35 * k * (g.a < 0 ? -1 : 1), 1.35 * k);
+  fctx.lineJoin = 'round'; fctx.strokeStyle = '#000'; fctx.lineWidth = 3;
+  // barrel (pointing up), cylinder, frame, grip
+  fctx.fillStyle = '#9aa3ad'; fctx.beginPath(); fctx.rect(-6, -70, 12, 52); fctx.fill(); fctx.stroke();
+  fctx.fillStyle = '#6d757e'; fctx.beginPath(); fctx.rect(-14, -22, 28, 26); fctx.fill(); fctx.stroke();
+  fctx.fillStyle = '#7d8790'; fctx.beginPath(); fctx.moveTo(-10, 4); fctx.lineTo(12, 4); fctx.lineTo(16, 16); fctx.lineTo(-8, 16); fctx.closePath(); fctx.fill(); fctx.stroke();
+  fctx.fillStyle = '#8a4b1f'; fctx.beginPath(); fctx.moveTo(-8, 14); fctx.lineTo(16, 14); fctx.quadraticCurveTo(30, 40, 34, 64); fctx.lineTo(12, 66); fctx.quadraticCurveTo(6, 40, -8, 14); fctx.closePath(); fctx.fill(); fctx.stroke();
+  fctx.beginPath(); fctx.arc(-14, 18, 9, 0.3, 2.6); fctx.stroke(); // trigger guard
+  fctx.restore();
+}
+function drawFx(dt, k) {
+  for (const g of guns) { g.age += dt; g.kick = Math.max(0, g.kick - dt * 7); drawGun(g, k); }
+  guns = guns.filter((g) => g.age < g.life);
+  for (const p of fxp) {
+    p.age += dt; const u = p.age / p.life; if (u >= 1) continue;
+    if (p.t === 'smoke') {
+      p.x += p.vx * dt; p.y += p.vy * dt; p.vy *= 0.985; const r = p.r0 + (p.r1 - p.r0) * Math.sqrt(u);
+      fctx.globalAlpha = 0.55 * (1 - u); fctx.fillStyle = `rgb(${p.g},${p.g},${p.g})`; fctx.beginPath(); fctx.arc(p.x, p.y, r, 0, 6.3); fctx.fill();
+    } else if (p.t === 'spark') {
+      p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 900 * k * dt;
+      fctx.globalAlpha = 1 - u; fctx.strokeStyle = '#ffd34d'; fctx.lineWidth = 3 * k; fctx.beginPath(); fctx.moveTo(p.x, p.y); fctx.lineTo(p.x - p.vx * 0.03, p.y - p.vy * 0.03); fctx.stroke();
+    } else if (p.t === 'flash') {
+      const r = p.r * (0.6 + 0.6 * u); fctx.globalAlpha = 1 - u * u;
+      const gr = fctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r); gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.25, '#fff3a0'); gr.addColorStop(0.55, 'rgba(255,150,20,0.9)'); gr.addColorStop(1, 'rgba(255,80,0,0)');
+      fctx.fillStyle = gr; fctx.beginPath();
+      for (let i = 0; i < 20; i++) { const a = p.rot + i * Math.PI / 10, rr = i % 2 ? r * 0.45 : r * 1.25; i ? fctx.lineTo(p.x + Math.cos(a) * rr, p.y + Math.sin(a) * rr) : fctx.moveTo(p.x + Math.cos(a) * rr, p.y + Math.sin(a) * rr); }
+      fctx.closePath(); fctx.fill();
+    } else if (p.t === 'bang') {
+      const s = (0.6 + 0.7 * Math.min(1, u * 5)) * k; fctx.globalAlpha = u < 0.7 ? 1 : (1 - u) / 0.3;
+      fctx.save(); fctx.translate(p.x, p.y - u * 30 * k); fctx.rotate(p.rot); fctx.scale(s, s);
+      fctx.font = '900 46px system-ui, -apple-system, sans-serif'; fctx.textAlign = 'center'; fctx.textBaseline = 'middle';
+      fctx.lineWidth = 8; fctx.strokeStyle = '#3a1500'; fctx.strokeText('BANG!', 0, 0); fctx.fillStyle = '#ffcf33'; fctx.fillText('BANG!', 0, 0); fctx.restore();
+    }
+  }
+  fctx.globalAlpha = 1; fxp = fxp.filter((p) => p.age < p.life);
+}
 function drawConfetti(dt) {
-  if (!confOn) return; fctx.clearRect(0, 0, fx.width, fx.height); const k = fx.width / window.innerWidth;
+  if (!confOn && !fxp.length && !guns.length) return; fctx.clearRect(0, 0, fx.width, fx.height); const k = fx.width / window.innerWidth;
+  drawFx(dt, k);
   for (const p of conf) { p.x += p.vx * dt * k; p.y += p.vy * dt * k; p.r += p.vr * dt; fctx.save(); fctx.translate(p.x, p.y); fctx.rotate(p.r); fctx.fillStyle = p.c; fctx.fillRect(-p.s * k / 2, -p.s * k / 4, p.s * k, p.s * k / 2); fctx.restore(); }
-  conf = conf.filter((p) => p.y < fx.height + 30); if (!conf.length) { confOn = false; fctx.clearRect(0, 0, fx.width, fx.height); }
+  conf = conf.filter((p) => p.y < fx.height + 30); if (!conf.length && !fxp.length && !guns.length) { confOn = false; fctx.clearRect(0, 0, fx.width, fx.height); }
 }
 
 // ---------------- frame ----------------
@@ -693,6 +777,7 @@ function updateScene(dt) {
       camPos.set(camF.pos.x + Math.cos(a) * rad, camF.pos.y + 3.0, camF.pos.z + Math.sin(a) * rad);
       camLook.set(camF.pos.x, camF.pos.y + 0.6, camF.pos.z);
     }
+    if (shake > 0) { shake -= dt; camPos.x += (Math.random() - 0.5) * shake * 1.2; camPos.y += (Math.random() - 0.5) * shake * 1.2; }
     camera.position.copy(camPos); camera.up.set(0, 1, 0); camera.lookAt(camLook); camera.fov = 55; camera.updateProjectionMatrix();
     return;
   }

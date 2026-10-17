@@ -98,6 +98,7 @@ function buildIndy() {
     LINE[i] = hi - (hi - lo) * bump;
     T.B[i] = BANK * f; T.AIN[i] = 4.2; T.AOUT[i] = 0; T.WIN[i] = 7; T.WOUT[i] = 0; T.VP[i] = 1e9; T.VPP[i] = 1e9;
   }
+  easeBank(T, n, 30);
   T.segName = (s) => { let a = 0; for (const sg of SEGS) { if (s < a + sg[1]) return sg[2]; a += sg[1]; } return ''; };
   return finish(T, L_);
 }
@@ -108,6 +109,11 @@ function boxSmooth(A, n, r) {
   for (let j = -r; j <= r; j++) acc += A[((j % n) + n) % n];
   for (let i = 0; i < n; i++) { out[i] = acc / (2 * r + 1); acc += A[(i + r + 1) % n] - A[((i - r) % n + n) % n]; }
   out[n] = out[0]; return out;
+}
+// Ease banking and track width in and out of every corner: two box passes give a long, curvature-continuous
+// blend, so the surface height never steps at a corner entry/exit or at the lap's wrap point.
+function easeBank(T, n, r) {
+  for (const k of ['B', 'DIN', 'DOUT']) { const A = boxSmooth(boxSmooth(T[k], n, r), n, r); for (let i = 0; i <= n; i++) T[k][i] = A[i]; }
 }
 // Grip model for corners (road course): lateral grip grows with speed (downforce).
 export const GRIP0 = 28, GRIP1 = 0.25;
@@ -153,14 +159,15 @@ function buildFromCentreline(id, D) {
     for (let i = 0; i < n; i++) {
       const s = i * ds;
       // Texas: turns 1-2 banked 20°, turns 3-4 24°, the front-stretch dogleg 8°
-      const turnBank = (X[i] > 0 ? 20 : 24) * DEG;
-      const front = smooth(10, 120, s) * (1 - smooth(560, 680, s));
+      const turnBank = (24 - 4 * smooth(-60, 60, X[i])) * DEG;
+      const front = s < 700 || s > L_ - 400 ? 1 : 0;   // the whole front stretch (Turn 4 exit to Turn 1) keeps 8°
       B[i] = Math.max(F[i] * turnBank, front * 8 * DEG);
       DIN[i] = -7.6 - 1.5 * F[i]; DOUT[i] = 7.6 + 1.5 * F[i];
       const hi = 4.9, lo = DIN[i] + 1.45, bump = clamp(Fw[i] / fm * 1.25, 0, 1);
       LINE[i] = hi - (hi - lo) * bump;
       T.AIN[i] = 4.2; T.AOUT[i] = 0; T.WIN[i] = 7; T.WOUT[i] = 0; T.VP[i] = 1e9; T.VPP[i] = 1e9;
     }
+    easeBank(T, n, 45);
     T.segName = (s) => s < 690 ? 'Front stretch' : s < 1150 ? 'Turns 1-2' : s < 1500 ? 'Back stretch' : s < 2300 ? 'Turns 3-4' : 'Front stretch';
   } else {
     const Kw = boxSmooth(boxSmooth(Kraw, n, 9), n, 9);
