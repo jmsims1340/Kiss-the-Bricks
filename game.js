@@ -536,6 +536,9 @@ document.querySelectorAll('.seg[data-key] button').forEach((b) => b.addEventList
   if (k === 'sound') { if (!v) { playTheme(false); if (eng) eng.g.gain.value = 0; } else if (state === 'title') { initAudio(); playTheme(true); } }
 }));
 $('segLaps').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { cfg.laps = +b.dataset.v; syncSettings(); initAudio(); if (state === 'title') playTheme(true); }));
+if (window.GDGBoard) window.GDGBoard.init({ game: 'kissthebricks', title: 'Kiss the Bricks', boards: { indy: 'Indy Oval', texas: 'Texas', road: 'Road Course' }, order: 'asc', fmt: fmt, unit: 'Best lap per track. Faster is better.', accent: '#f2c230' });
+$('btnBoard').addEventListener('click', () => { if (window.GDGBoard) window.GDGBoard.show(cfg.track); });
+$('btnFBoard').addEventListener('click', () => { if (window.GDGBoard) window.GDGBoard.show(S.INFO.id); });
 let settingsFrom = 'title';
 $('btnSettings').addEventListener('click', () => { settingsFrom = 'title'; show('settings', true); });
 $('btnPauseSettings').addEventListener('click', () => { settingsFrom = 'pause'; show('pause', false); show('settings', true); });
@@ -1122,6 +1125,8 @@ function showFinish() {
   const st = S.standings(race);
   const rows = st.slice(0, 5); if (!rows.includes(p)) rows.push(p);
   $('fTable').innerHTML = rows.map((c) => `<li class="${c.isPlayer ? 'me' : ''}"><span class="p">${st.indexOf(c) + 1}</span><span class="sw" style="background:#${c.color.toString(16).padStart(6, '0')}"></span><span class="n">${c.name}</span><span>${c.bestLap ? fmt(c.bestLap) : ''}</span></li>`).join('');
+  // online leaderboard: best lap per track; a lap that makes the top 10 gets the initials entry (never blocks the race flow)
+  if (window.GDGBoard && p.bestLap) { const tid = I.id, lap = p.bestLap; setTimeout(() => { if (finishShown && !$('finish').classList.contains('hidden')) window.GDGBoard.afterRound(tid, lap); }, pos === 1 ? 2600 : 1200); }
   const win = pos === 1;
   $('fHead').textContent = win ? 'WINNER · ' + (I.id === 'texas' ? 'TEXAS' : I.id === 'road' ? 'INDY ROAD COURSE' : 'INDIANAPOLIS') : 'CHECKERED FLAG';
   $('btnKiss').classList.toggle('hidden', !win);

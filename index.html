@@ -62,7 +62,7 @@
       <button data-v="5">5 laps</button><button data-v="10">10 laps</button><button data-v="20">20 laps</button>
     </div>
     <button id="btnRace" class="big">RACE</button>
-    <button id="btnSettings" class="ghost">Settings</button>
+    <div class="btnrow2"><button id="btnSettings" class="ghost">Settings</button><button id="btnBoard" class="ghost">🏆 Leaderboard</button></div>
     <p class="tip">Drag a thumb left/right anywhere to steer. Tuck in behind a car to catch the draft, then pull out and pass.</p>
   </div>
 </section>
@@ -110,12 +110,13 @@
     <div id="fSub" class="fsub"></div>
     <ol id="fTable" class="ftable"></ol>
     <button id="btnKiss" class="big kiss hidden">💋 Kiss the bricks</button>
-    <div class="btnrow"><button id="btnAgain" class="big">Race again</button><button id="btnMenu" class="ghost">Menu</button></div>
+    <div class="btnrow"><button id="btnAgain" class="big">Race again</button><button id="btnFBoard" class="ghost" aria-label="Leaderboard">🏆</button><button id="btnMenu" class="ghost">Menu</button></div>
   </div>
 </section>
 
 <div id="loading" class="loading">Loading the track…</div>
 <audio id="theme" src="theme.m4a" loop preload="auto"></audio>
+<script src="leaderboard.js"></script>
 <script type="module" src="game.js"></script>
 </body>
 </html>

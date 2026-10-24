@@ -164,3 +164,8 @@ html.shake #gl,html.shake .screen .card{animation:ktbShake .32s linear}
 .flagsub{font-size:14px;font-weight:800;color:#fff;letter-spacing:.02em}
 .flagsub:empty{display:none}
 @media (orientation:landscape) and (max-height:500px){.flagbar{top:calc(6px + var(--safe-t));padding:5px 10px 6px;min-width:0}.flagrow b{font-size:18px}.coach{top:30%}}
+
+/* leaderboard */
+.btnrow2{display:flex;gap:8px}.btnrow2 .ghost{flex:1}
+#btnBoard{color:#f2c230}
+#btnFBoard{flex:0 0 52px;font-size:20px;padding:8px}
