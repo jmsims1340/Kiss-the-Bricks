@@ -29,6 +29,7 @@
       <div><span class="lbl">LAP</span><b id="hTime">0:00.0</b></div>
       <div><span class="lbl">LAST</span><b id="hLast">--</b></div>
       <div><span class="lbl">BEST</span><b id="hBest">--</b></div>
+      <div id="hGhost" class="gdelta"><span class="lbl">GHOST</span><b>+0.00</b></div>
     </div>
     <canvas id="map" width="160" height="80" aria-hidden="true"></canvas>
   </div>
@@ -71,6 +72,7 @@
 <section id="tracks" class="screen tracks hidden" aria-label="Choose a track">
   <div class="tpanel">
     <div class="thead"><button id="btnTrackBack" class="ghost tback" aria-label="Back">&#8249; Back</button><h2>Pick your track</h2></div>
+    <div class="seg modeseg" data-key="mode" role="radiogroup" aria-label="Mode"><button data-v="race">🏁 Race the field</button><button data-v="tt">⏱ Time trial + ghost</button></div>
     <div id="trackList" class="tlist"></div>
   </div>
 </section>
@@ -88,6 +90,9 @@
     <div class="set"><span>Coach</span><div class="seg" data-key="coach"><button data-v="true">On</button><button data-v="false">Off</button></div></div>
     <div class="set"><span>Coach voice</span><div class="seg" data-key="coachVoice"><button data-v="true">On</button><button data-v="false">Off</button></div></div>
     <div class="set"><span>Sound</span><div class="seg" data-key="sound"><button data-v="true">On</button><button data-v="false">Off</button></div></div>
+    <div class="set"><span>Ghost car</span><div class="seg" data-key="ghost"><button data-v="true">On</button><button data-v="false">Off</button></div></div>
+    <div class="set"><span>Haptics</span><div class="seg" data-key="haptics"><button data-v="true">On</button><button data-v="false">Off</button></div></div>
+    <div class="set"><span>Graphics</span><div class="seg" data-key="gfx"><button data-v="auto">Auto</button><button data-v="high">Max</button><button data-v="low">Fast</button></div></div>
     <p id="tiltNote" class="note"></p>
     <button id="btnSetDone" class="big">Done</button>
   </div>
