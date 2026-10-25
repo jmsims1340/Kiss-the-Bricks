@@ -169,3 +169,15 @@ html.shake #gl,html.shake .screen .card{animation:ktbShake .32s linear}
 .btnrow2{display:flex;gap:8px}.btnrow2 .ghost{flex:1}
 #btnBoard{color:#f2c230}
 #btnFBoard{flex:0 0 52px;font-size:20px;padding:8px}
+
+/* back to the Game Day Garage arcade */
+.gdg-home{position:absolute;z-index:5;top:calc(10px + var(--safe-t));left:calc(10px + var(--safe-l));display:inline-flex;align-items:center;gap:6px;height:38px;padding:0 13px 0 9px;border-radius:999px;background:rgba(12,12,14,.8);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);border:1px solid rgba(242,194,48,.7);color:#fff;font-size:12px;font-weight:900;font-style:italic;letter-spacing:.08em;text-decoration:none;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.5);-webkit-tap-highlight-color:transparent}
+.gdg-home:active{transform:scale(.96)}
+.gdg-home .chev,.gdglink .chev{color:var(--gold);font-size:20px;line-height:1;font-style:normal;margin-top:-2px}
+.gdg-home img{width:22px;height:24px;display:block}
+.gdg-home .s{display:none}
+.gdglink{display:flex;align-items:center;justify-content:center;gap:7px;color:#fff;text-decoration:none;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+.gdglink img{width:20px;height:22px;display:block}
+.gdglink:active{background:rgba(255,255,255,.18)}
+@media (orientation:landscape) and (max-height:500px){.gdg-home{height:34px;font-size:11px;padding:0 11px 0 8px}.gdg-home .t{display:none}.gdg-home .s{display:inline}}
+@media (max-height:430px){.gdglink{min-height:38px;padding:8px}}
