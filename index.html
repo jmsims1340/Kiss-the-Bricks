@@ -12,7 +12,7 @@
 <title>Kiss the Bricks</title>
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="apple-touch-icon.png">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=daily1">
 </head>
 <body>
 <canvas id="gl" aria-label="Race view"></canvas>
@@ -23,6 +23,7 @@
   <div class="hud-tl">
     <div class="pos"><span class="lbl">POS</span><b id="hPos">11</b><span id="hField">/33</span></div>
     <div class="lap"><span class="lbl">LAP</span><b id="hLap">1</b><span id="hLaps">/10</span></div>
+    <div id="hWind" class="wind" aria-hidden="true"><span class="lbl">WIND</span><i>&#8593;</i><b>0</b><em>HEAD</em></div>
   </div>
   <div class="hud-tr">
     <div class="times">
@@ -64,6 +65,16 @@
       <button data-v="5">5 laps</button><button data-v="10">10 laps</button><button data-v="20">20 laps</button>
     </div>
     <button id="btnRace" class="big">RACE</button>
+    <div class="dailywrap">
+      <button id="btnDaily" class="dailycard" aria-label="Daily Challenge">
+        <span class="dhead"><span class="dk">DAILY CHALLENGE</span><span id="dDate" class="dd"></span></span>
+        <span id="dTitle" class="dt"></span>
+        <span id="dSetup" class="ds"></span>
+        <span id="dCond" class="dc"></span>
+        <span id="dSub" class="dsub"></span>
+      </button>
+      <button id="btnDailyBoard" class="dboard" aria-label="Today's Daily leaderboard">🏆</button>
+    </div>
     <div class="btnrow2"><button id="btnSettings" class="ghost">Settings</button><button id="btnBoard" class="ghost">🏆 Leaderboard</button></div>
     <p class="tip">Drag a thumb left/right anywhere to steer. Tuck in behind a car to catch the draft, then pull out and pass.</p>
   </div>
@@ -125,6 +136,6 @@
 <div id="loading" class="loading">Loading the track…</div>
 <audio id="theme" src="theme.m4a" loop preload="auto"></audio>
 <script src="leaderboard.js"></script>
-<script type="module" src="game.js"></script>
+<script type="module" src="game.js?v=daily1"></script>
 </body>
 </html>

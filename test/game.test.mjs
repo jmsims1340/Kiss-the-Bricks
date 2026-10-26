@@ -13,13 +13,13 @@ test('page shell: title, phone viewport, home-screen tags, external module scrip
   assert.match(html, /name="viewport"[^>]*width=device-width[^>]*viewport-fit=cover/);
   assert.match(html, /apple-mobile-web-app-capable/);
   assert.match(html, /rel="apple-touch-icon" href="apple-touch-icon.png"/);
-  assert.match(html, /<script type="module" src="game.js"><\/script>/);
+  assert.match(html, /<script type="module" src="game.js(\?v=\w+)?"><\/script>/);
   assert.doesNotMatch(html, /<script>(?!<)/, 'no inline scripts');
   assert.doesNotMatch(html + readFileSync(path.join(site, 'game.js'), 'utf8'), /lorem ipsum|TODO|FIXME|placeholder/i);
 });
 
 test('every local asset referenced exists and the theme is a phone-playable m4a', () => {
-  const refs = [...html.matchAll(/(?:src|href)="([^"#:]+)"/g)].map((m) => m[1]);
+  const refs = [...html.matchAll(/(?:src|href)="([^"#:]+)"/g)].map((m) => m[1].replace(/\?v=\w+$/, ''));
   const game = readFileSync(path.join(site, 'game.js'), 'utf8');
   for (const m of game.matchAll(/from '\.\/([^']+)'/g)) refs.push(m[1]);
   assert.ok(refs.includes('title.jpg') && refs.includes('theme.m4a') && refs.includes('three.module.min.js'));
@@ -204,4 +204,60 @@ test('coach and yellow-flag start are wired into the page', () => {
 test('track switching restores the Indianapolis oval', () => {
   S.setTrack('road'); assert.ok(S.L > 4000 && S.INFO.kind === 'road');
   S.setTrack('indy'); assert.ok(Math.abs(S.L - 2.5 * 1609.344) < 1); assert.equal(S.S_LINE, 610);
+});
+
+
+// ---------------- Daily Challenge ----------------
+const D = await import(path.join(site, 'daily.js'));
+
+test('daily: same challenge for everyone on a date, New York calendar, valid ranges', () => {
+  assert.deepEqual(D.dailySpec('20261026'), D.dailySpec('20261026'));
+  // 03:30 UTC on Oct 26 is still Oct 25 in New York; 05:00 UTC is Oct 26
+  assert.equal(D.nyDateKey(new Date('2026-10-26T03:30:00Z')), '20261025');
+  assert.equal(D.nyDateKey(new Date('2026-10-26T05:00:00Z')), '20261026');
+  const ms = D.msToNext(Date.parse('2026-10-26T03:30:00Z'));
+  assert.ok(Math.abs(ms - 30 * 60000) < 2000, 'next challenge at NY midnight: ' + ms);
+  let k = '20261025', prev = null; const seen = new Set();
+  for (let i = 0; i < 120; i++, k = D.shiftKey(k, 1)) {
+    const s = D.dailySpec(k);
+    assert.equal(s.key, k); assert.ok(D.TRACKS.includes(s.track)); seen.add(s.track);
+    assert.notEqual(s.track, prev, 'no track two days running (' + k + ')'); prev = s.track;
+    assert.ok(s.laps >= 3 && s.laps <= 10); assert.ok(['race', 'tt'].includes(s.mode));
+    assert.ok(s.grid >= 1 && s.grid <= s.field || s.mode === 'tt');
+    assert.ok(['rookie', 'pro', 'veteran'].includes(s.difficulty)); assert.ok(['day', 'golden', 'overcast'].includes(s.look));
+    assert.ok(s.cond.grip >= 0.95 && s.cond.grip <= 1.03 && s.cond.windMph >= 4 && s.cond.windMph <= 20);
+    assert.ok(s.desc.length > 40 && !/undefined|NaN/.test(s.desc), s.desc);
+  }
+  assert.equal(seen.size, 3);
+});
+
+test('daily conditions never leak into a normal race (normal physics unchanged)', () => {
+  const run = (o) => { const r = S.createRace(Object.assign({ track: 'indy', laps: 2, field: 11, grid: 6, difficulty: 'pro', seed: 99 }, o)); r.autopilot = true;
+    for (let i = 0; i < 60 * 120 && !r.playerFinished; i++) S.stepRace(r, 1 / 60, {}); return r; };
+  const a = run({});
+  assert.equal(S.COND, null);
+  run({ cond: { grip: 0.95, windMph: 18, windDeg: 180, gust: 0.4 } });
+  assert.ok(S.COND && S.COND.mph === 18, 'daily race sets its conditions');
+  const b = run({});
+  assert.equal(S.COND, null, 'the next normal race clears them');
+  assert.deepEqual(b.cars.map((c) => [c.dist, c.d, c.bestLap]), a.cars.map((c) => [c.dist, c.d, c.bestLap]));
+});
+
+test('daily wind and grip change lap times the expected way', () => {
+  const lap = (track, cond) => { const r = S.createRace({ track, laps: 2, field: 2, grid: 1, seed: 5, cond }); r.cars = [r.player]; r.autopilot = true;
+    for (let i = 0; i < 60 * 300 && !r.playerFinished; i++) S.stepRace(r, 1 / 60, {}); return r.player.bestLap; };
+  const base = lap('road', null), slick = lap('road', { grip: 0.95 }), sticky = lap('road', { grip: 1.03 });
+  assert.ok(slick > base + 0.3 && sticky < base - 0.2, [base, slick, sticky].join(' '));
+  const calm = lap('indy', null), windy = lap('indy', { grip: 1, windMph: 18, windDeg: 180, gust: 0 });
+  assert.ok(windy > calm, 'wind costs time on the oval overall: ' + calm + ' ' + windy);
+  for (const t of [base, slick, sticky, calm, windy]) assert.ok(t > 18 && t < 900, 'inside the board range');
+  S.createRace({ track: 'indy' }); S.setTrack('indy');
+});
+
+test('daily challenge is wired into the page and posts to daily-YYYYMMDD', () => {
+  for (const id of ['btnDaily', 'btnDailyBoard', 'dDate', 'dTitle', 'dSetup', 'dCond', 'dSub', 'hWind']) assert.match(html, new RegExp('id="' + id + '"'));
+  const game = readFileSync(path.join(site, 'game.js'), 'utf8');
+  assert.match(game, /from '\.\/daily\.js'/);
+  assert.match(game, /'daily-' \+ d\.key/);
+  assert.match(game, /pb = best && !race\.daily && saveBest/, 'daily laps never touch the normal personal bests');
 });

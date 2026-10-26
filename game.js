@@ -5,6 +5,7 @@ import { makeSky, makeEnvironment, makePost } from './gfx.js';
 import { buildIndyCar, buildPaceCar } from './carmodel.js';
 import * as G from './ghost.js';
 import { buzz, setHaptics, onUserGesture } from './haptics.js';
+import * as D from './daily.js';
 
 const Q = new URLSearchParams(location.search);
 const $ = (id) => document.getElementById(id);
@@ -648,14 +649,20 @@ document.querySelectorAll('.seg[data-key] button').forEach((b) => b.addEventList
   if (k === 'sound') { if (!v) { playTheme(false); if (eng) eng.g.gain.value = 0; } else if (state === 'title') { initAudio(); playTheme(true); } }
 }));
 $('segLaps').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { cfg.laps = +b.dataset.v; syncSettings(); initAudio(); if (state === 'title') playTheme(true); }));
-if (window.GDGBoard) window.GDGBoard.init({ game: 'kissthebricks', title: 'Kiss the Bricks', boards: { indy: 'Indy Oval', texas: 'Texas', road: 'Road Course' }, order: 'asc', fmt: fmt, unit: 'Best lap per track. Faster is better.', accent: '#f2c230' });
-$('btnBoard').addEventListener('click', () => { if (window.GDGBoard) window.GDGBoard.show(cfg.track); });
-$('btnFBoard').addEventListener('click', () => { if (window.GDGBoard) window.GDGBoard.show(S.INFO.id); });
+// the leaderboard knows today's Daily board too (re-read each time: the day can roll over while the page is open)
+function lbBoards() {
+  if (!window.GDGBoard) return;
+  const key = race && race.daily ? race.daily.key : dailyKey();
+  window.GDGBoard.init({ game: 'kissthebricks', title: 'Kiss the Bricks', boards: { indy: 'Indy Oval', texas: 'Texas', road: 'Road Course', ['daily-' + key]: 'Daily · ' + D.keyLabel(key).replace(/^\w+, /, '') }, order: 'asc', fmt: fmt, unit: 'Best lap per track. Faster is better. Daily: best lap in today\'s challenge.', accent: '#f2c230' });
+}
+lbBoards();
+$('btnBoard').addEventListener('click', () => { lbBoards(); if (window.GDGBoard) window.GDGBoard.show(cfg.track); });
+$('btnFBoard').addEventListener('click', () => { lbBoards(); if (window.GDGBoard) window.GDGBoard.show(race && race.daily ? 'daily-' + race.daily.key : S.INFO.id); });
 let settingsFrom = 'title';
 $('btnSettings').addEventListener('click', () => { settingsFrom = 'title'; show('settings', true); });
 $('btnPauseSettings').addEventListener('click', () => { settingsFrom = 'pause'; show('pause', false); show('settings', true); });
 $('btnSetDone').addEventListener('click', () => { show('settings', false); if (settingsFrom === 'pause') show('pause', true); });
-$('btnRace').addEventListener('click', () => { initAudio(); if (actx && actx.state === 'suspended') actx.resume(); buildTrackCards(); show('title', false); show('tracks', true); });
+$('btnRace').addEventListener('click', () => { daily = null; initAudio(); if (actx && actx.state === 'suspended') actx.resume(); buildTrackCards(); show('title', false); show('tracks', true); });
 $('btnPause').addEventListener('click', () => togglePause());
 $('btnCam').addEventListener('click', () => { camMode = (camMode + 1) % 3; });
 $('btnResume').addEventListener('click', () => togglePause(false));
@@ -681,9 +688,9 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) { if 
 let bests = {}; try { bests = JSON.parse(localStorage.getItem('ktb-best') || '{}') || {}; } catch (e) {}
 const saveBest = (id, t) => { if (!t) return false; if (bests[id] && bests[id] <= t) return false; bests[id] = t; try { localStorage.setItem('ktb-best', JSON.stringify(bests)); } catch (e) {} return true; };
 let builtTrack = null;
-function applyTrack(id) {
+function applyTrack(id, keepCfg) {
   if (!S.TRACK_INFO[id]) id = 'indy';
-  cfg.track = id; save();
+  if (!keepCfg) { cfg.track = id; save(); }
   S.setTrack(id); L = S.L; SL = S.S_LINE;
   if (builtTrack !== id) { buildWorld(id); builtTrack = id; }
   drawMapBg();
@@ -714,14 +721,106 @@ function buildTrackCards() {
     const b = document.createElement('button'); b.className = 'tcard' + (cfg.track === id ? ' sel' : ''); b.dataset.track = id;
     b.setAttribute('aria-label', I.name + ', ' + I.lenMi + ' miles');
     b.innerHTML = `<canvas width="240" height="132" aria-hidden="true"></canvas><span class="tinfo"><b>${I.name}</b><span class="tlen">${I.lenMi} mi · ${I.turns} turns · ${I.kind === 'road' ? 'flat' : I.bank + ' banking'}</span><span class="tbest">${bests[id] ? 'Your best lap ' + fmt(bests[id]) : (id === 'road' ? 'Brake zones. Use BRAKE.' : 'No lap yet')}${G.loadGhost(id) ? ' · <i class="gh">👻 ghost</i>' : ''}</span></span>`;
-    b.addEventListener('click', () => { initAudio(); if (actx && actx.state === 'suspended') actx.resume(); applyTrack(id); show('tracks', false); startRace(); });
+    b.addEventListener('click', () => { initAudio(); if (actx && actx.state === 'suspended') actx.resume(); daily = null; applyTrack(id); show('tracks', false); startRace(); });
     box.appendChild(b); drawThumb(b.querySelector('canvas'), id);
   }
 }
 $('btnTrackBack').addEventListener('click', () => { show('tracks', false); show('title', true); });
 
+// ---------------- Daily Challenge ----------------
+// One seeded race a day (daily.js): same track, laps, grid, field, time of day, wind and grip for everyone.
+// The first run of the day counts (once the green flag drops) and its best lap can go on today's board;
+// every run after that is practice and never posts. Normal races, their bests, ghosts and boards are untouched.
+let daily = null;                                   // { spec, official } while a daily run is set up
+const DAILY_STORE = 'ktb-daily-v1';                 // { key: 'YYYYMMDD', used, best }
+function dailyKey() { const q = Q.get('daily'); return D.validKey(q) ? q : D.nyDateKey(); }
+function dailyRec() { try { const v = JSON.parse(localStorage.getItem(DAILY_STORE) || 'null'); return v && typeof v.key === 'string' ? v : null; } catch (e) { return null; } }
+function dailySave(v) { try { localStorage.setItem(DAILY_STORE, JSON.stringify(v)); } catch (e) {} }
+// a run counts only on today's real date (a ?daily= preview of another day is always practice) and only once
+function dailyCanCount(key) { const r = dailyRec(); return key === D.nyDateKey() && !(r && r.key === key && r.used); }
+function dailyMarkUsed(key) { const r = dailyRec(); if (!r || r.key !== key || !r.used) dailySave({ key, used: true, best: null, at: Date.now() }); }
+function dailySetBest(key, lap) { const r = dailyRec() || { key, used: true }; if (r.key !== key) return; r.best = lap || null; r.done = true; dailySave(r); }
+function ghostId() { return race && race.daily ? 'daily-' + race.daily.key : S.INFO.id; }
+// old days' ghosts are dead weight in localStorage: keep today's only
+(() => { try { const keep = 'ktb-ghost-daily-' + dailyKey(); for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && k.startsWith('ktb-ghost-daily-') && k !== keep) localStorage.removeItem(k); } } catch (e) {} })();
+
+// time of day: a look only (sky, sun, fog, light); 'day' is exactly the normal game's lighting
+const LOOK = {
+  day: { sun: [0.52, 0.62, 0.36], zen: 0x1d4f9c, hor: 0xa9c6df, gnd: 0x6f7468, clouds: 0.75, fog: 0xa9c6df, fogN: 320, fogF: 2300, hs: 0xd9e8ff, hg: 0x4f5a3a, hi: 1.05, sc: 0xfff1dc, si: 3.0, exp: 1.0 },
+  golden: { sun: [0.78, 0.2, 0.42], zen: 0x2b4f86, hor: 0xf2b886, gnd: 0x5d5446, clouds: 0.55, fog: 0xd9a888, fogN: 300, fogF: 2100, hs: 0xffdcb8, hg: 0x4a4031, hi: 0.85, sc: 0xffc27f, si: 2.7, exp: 1.02 },
+  overcast: { sun: [0.3, 0.8, 0.5], zen: 0x5d6874, hor: 0xb4bcc5, gnd: 0x5f645c, clouds: 1.15, fog: 0xadb5be, fogN: 240, fogF: 1800, hs: 0xe1e7ee, hg: 0x4d5546, hi: 1.45, sc: 0xe6ebf2, si: 1.15, exp: 1.04 },
+};
+let lookNow = 'day';
+function applyLook(name) {
+  const L0 = LOOK[name] || LOOK.day; if (name === lookNow || !LOOK[name]) return; lookNow = name;
+  SUN_DIR.set(L0.sun[0], L0.sun[1], L0.sun[2]).normalize();
+  const u = sky.uniforms; u.uSun.value.copy(SUN_DIR); u.uZen.value.set(L0.zen); u.uHor.value.set(L0.hor); u.uGround.value.set(L0.gnd); u.uCloudAmt.value = L0.clouds;
+  scene.fog.color.set(L0.fog); scene.fog.near = L0.fogN; scene.fog.far = L0.fogF;
+  hemi.color.set(L0.hs); hemi.groundColor.set(L0.hg); hemi.intensity = L0.hi;
+  sun.color.set(L0.sc); sun.intensity = L0.si; renderer.toneMappingExposure = L0.exp;
+  try { const rt = makeEnvironment(renderer, sky, {}); if (envRT) envRT.dispose(); envRT = rt; scene.environment = rt.texture; } catch (e) {}
+}
+
+// title-screen card: today's challenge, whether the counted run is used, and the countdown to the next one
+function renderDailyCard() {
+  const key = dailyKey(), sp = D.dailySpec(key), r = dailyRec(), today = key === D.nyDateKey();
+  const used = r && r.key === key && r.used;
+  $('dDate').textContent = sp.label.replace(/^(\w{3})\w*, /, '$1 · ').toUpperCase();
+  $('dTitle').textContent = sp.title;
+  $('dSetup').textContent = sp.setup;
+  $('dCond').textContent = sp.conds;
+  const next = 'New challenge in ' + D.fmtCountdown(D.msToNext());
+  $('dSub').textContent = !today ? 'Preview of another day · practice only' : used ? ((r.best ? 'Your counted lap ' + fmt(r.best) : r.done ? 'Counted run done' : 'Counted run used') + ' · replays are practice · ' + next) : 'One counted run · ' + next;
+  $('btnDaily').classList.toggle('done', !!used || !today);
+  $('btnDaily').setAttribute('aria-label', 'Daily Challenge, ' + sp.label + '. ' + sp.desc);
+}
+setInterval(() => { if (state === 'title') renderDailyCard(); }, 20000);
+function startDaily() {
+  initAudio(); if (actx && actx.state === 'suspended') actx.resume();
+  daily = { spec: D.dailySpec(dailyKey()), official: false };
+  show('title', false); startRace();
+}
+$('btnDaily').addEventListener('click', startDaily);
+$('btnDailyBoard').addEventListener('click', (e) => { e.stopPropagation(); lbBoards(); if (window.GDGBoard) window.GDGBoard.show('daily-' + dailyKey()); });
+
+function showDailyFinish(p) {
+  const d = race.daily, sp = daily && daily.spec && daily.spec.key === d.key ? daily.spec : D.dailySpec(d.key), I = S.INFO;
+  const lap = p.bestLap || 0;
+  if (d.official) dailySetBest(d.key, lap);
+  $('fHead').textContent = (d.official ? 'DAILY CHALLENGE · ' : 'DAILY PRACTICE · ') + sp.label.replace(/^\w+, /, '').toUpperCase();
+  $('fPos').textContent = lap ? fmt(lap) : '--'; $('fPos').classList.add('time');
+  const mph = lap ? ' (' + (Math.round(I.lenMi * 3600 / lap * 10) / 10) + ' mph)' : '';
+  const r = dailyRec(), counted = r && r.key === d.key && r.best;
+  $('fSub').innerHTML = (lap ? 'Best lap' + mph : 'No timed lap') + (race.tt ? '' : ' · finished P' + p.finishPos + ' of ' + race.cars.length) +
+    '<br>' + (d.official ? (lap ? '<b class="pb">Counted for today\'s board</b>' : 'Counted run used') : 'Practice · doesn\'t post' + (counted ? ' · your counted lap ' + fmt(r.best) : '')) +
+    '<br><span class="dsmall">' + sp.trackName + ' · ' + sp.conds + '</span>';
+  $('fTable').innerHTML = lapTimes.map((t, i) => `<li class="${t === p.bestLap ? 'me' : ''}"><span class="p">${i + 1}</span><span class="sw" style="background:${t === p.bestLap ? '#f2c230' : '#5c6470'}"></span><span class="n">Lap ${i + 1}</span><span>${fmt(t)}</span></li>`).join('');
+  $('btnKiss').classList.add('hidden'); $('finish').classList.remove('side');
+  $('btnAgain').textContent = 'Practice';
+  lbBoards();
+  // counted run: a top-10 lap gets the initials entry; a lap that doesn't make it still shows today's top 10
+  if (window.GDGBoard && d.official && lap) { const b = 'daily-' + d.key; setTimeout(() => { if (!finishShown || $('finish').classList.contains('hidden')) return;
+    let asked = false; const watch = setInterval(() => { if (window.GDGBoard.isOpen()) asked = true; }, 200);
+    window.GDGBoard.afterRound(b, lap).then((ok) => { clearInterval(watch); if (!ok && !asked && finishShown && !$('finish').classList.contains('hidden') && !window.GDGBoard.isOpen()) window.GDGBoard.show(b); }); }, 1300); }
+  else if (window.GDGBoard) { const b = 'daily-' + d.key; setTimeout(() => { if (finishShown && !$('finish').classList.contains('hidden') && !window.GDGBoard.isOpen()) window.GDGBoard.show(b); }, 1600); }
+  buzz('finish'); playTheme(true); theme.volume = 0.45;
+  show('finish', true); hudEl.classList.add('hidden');
+}
+// HUD wind arrow (daily only): which way the wind blows relative to your car right now, and how hard
+const windEl = $('hWind'), WIN = {};
+function updateWindHUD() {
+  if (!race || !race.daily || !S.COND || !S.COND.mph) { windEl.classList.remove('on'); return; }
+  const p = race.player; S.windAt(p.dist, race.t, WIN);
+  const mph = Math.hypot(WIN.along, WIN.across) * S.MPH, ang = Math.atan2(WIN.across, WIN.along) * 180 / Math.PI;
+  windEl.classList.add('on');
+  windEl.querySelector('i').style.transform = 'rotate(' + ang.toFixed(0) + 'deg)';
+  windEl.querySelector('b').textContent = Math.round(mph);
+  windEl.querySelector('em').textContent = Math.abs(ang) < 50 ? 'TAIL' : Math.abs(ang) > 130 ? 'HEAD' : 'CROSS';
+}
+renderDailyCard();
+
 function toTitle() {
-  state = 'title'; show('title', true); hudEl.classList.add('hidden'); playTheme(true); engineSound(0, false, 0);
+  state = 'title'; show('title', true); renderDailyCard(); $('btnAgain').textContent = 'Race again'; document.body.classList.remove('isdaily'); hudEl.classList.add('hidden'); playTheme(true); engineSound(0, false, 0);
   race = null; kissMesh.visible = false; stopConfetti(); clearSkids(); coachEl.classList.remove('on'); flagbar.classList.remove('on'); flagObj.visible = false; if (skidA) skidA.g.gain.value = 0;
 }
 function togglePause(force) {
@@ -731,9 +830,16 @@ function togglePause(force) {
   else if (!p && state === 'paused') { state = 'race'; show('pause', false); show('settings', false); if (actx) actx.resume(); }
 }
 function startRace() {
-  applyTrack(cfg.track);
-  const tt = cfg.mode === 'tt';
-  race = S.createRace({ track: cfg.track, laps: cfg.laps, field: tt ? 2 : cfg.field, grid: tt ? 1 : Math.min(cfg.grid, cfg.field), difficulty: cfg.difficulty, assist: cfg.assist, autoThrottle: cfg.throttle === 'auto', seed: (Math.random() * 1e9) | 0 });
+  const dly = daily, sp = dly && dly.spec;
+  if (dly) dly.official = dailyCanCount(sp.key);  // the first run of the day counts; every run after it is practice
+  applyTrack(sp ? sp.track : cfg.track, !!sp);
+  applyLook(sp ? sp.look : 'day');
+  const tt = sp ? sp.mode === 'tt' : cfg.mode === 'tt';
+  race = sp
+    ? S.createRace({ track: sp.track, laps: sp.laps, field: tt ? 2 : sp.field, grid: tt ? 1 : sp.grid, difficulty: sp.difficulty, assist: cfg.assist, autoThrottle: cfg.throttle === 'auto', seed: +sp.key, cond: sp.cond })
+    : S.createRace({ track: cfg.track, laps: cfg.laps, field: tt ? 2 : cfg.field, grid: tt ? 1 : Math.min(cfg.grid, cfg.field), difficulty: cfg.difficulty, assist: cfg.assist, autoThrottle: cfg.throttle === 'auto', seed: (Math.random() * 1e9) | 0 });
+  race.daily = dly ? { key: sp.key, official: dly.official } : null;
+  document.body.classList.toggle('isdaily', !!dly);
   // time trial: just you, the pace car to the green, and your ghost
   if (tt) { race.cars = [race.player]; race.tt = true; }
   race.autopilot = Q.has('autopilot');
@@ -742,7 +848,7 @@ function startRace() {
   window.KTB.race = race;
   state = 'race'; finishShown = false; kissed = false; winCam = 0; kissMesh.visible = false; stopConfetti();
   show('title', false); show('tracks', false); show('finish', false); show('pause', false); hudEl.classList.remove('hidden');
-  $('hField').textContent = '/' + race.cars.length; $('hLaps').textContent = '/' + cfg.laps;
+  $('hField').textContent = '/' + race.cars.length; $('hLaps').textContent = '/' + race.opts.laps;
   tiltNeutral = null; input.steer = 0; input.rawSteer = 0;
   theme.volume = 0.3;
   banner.classList.remove('on'); msgT = 0;
@@ -752,6 +858,7 @@ function startRace() {
   hint.textContent = road ? how + ' ' + (cfg.throttle === 'auto' ? 'Gas is automatic. Hold BRAKE before the corners; it glows when you need it.' : 'Hold GAS to go, BRAKE before the corners.')
     : how + (tt ? ' ' : ' Tuck in behind a car to draft, pull out to pass. ') + (cfg.throttle === 'auto' ? 'Gas is automatic; hold LIFT to slow.' : 'Hold GAS to go.');
   if (tt) hint.textContent = 'TIME TRIAL · ' + (ghost && cfg.ghost ? 'Beat your ghost: ' + fmt(ghost.t) + '. ' : 'Set a lap and your ghost races you on the next one. ') + hint.textContent;
+  if (sp) hint.textContent = (race.daily.official ? 'DAILY CHALLENGE · your counted run. Best lap goes on today\'s board. ' : 'DAILY PRACTICE · doesn\'t post. ') + sp.windWords.charAt(0).toUpperCase() + sp.windWords.slice(1) + ', ' + sp.gripWords + '. ' + how;
   hint.classList.add('on');
   for (let i = 0; i < MAXC; i++) { bodyMesh.setColorAt(i, new THREE.Color(0x000000)); accMesh.setColorAt(i, new THREE.Color(0x000000)); }
   race.cars.forEach((c, i) => { bodyMesh.setColorAt(i, new THREE.Color(c.color)); accMesh.setColorAt(i, new THREE.Color(c.accent)); });
@@ -1148,7 +1255,7 @@ let ghostOn = false, rec = G.createRecorder(), ghost = null, ghostBase = 0, lapT
 const gpose = { s: 0, d: 0, h: 0 };
 function resetGhost() {
   rec = G.createRecorder(); ghostBase = 0; lapTimes = []; pbLap = 0; leadPos = 0; leadT = 0;
-  ghost = G.loadGhost(S.INFO.id); ghostCar.visible = false;
+  ghost = G.loadGhost(ghostId()); ghostCar.visible = false;
 }
 function ghostTick(lsBefore, finBefore) {
   const p = race.player; if (!p) return;
@@ -1158,7 +1265,7 @@ function ghostTick(lsBefore, finBefore) {
       G.recFrame(rec, race.raceT - lsBefore, p.dist - ghostBase, p.d, h);
       const lap = G.recEnd(rec, p.lastLap, L, p.d, h);
       lapTimes.push(p.lastLap);
-      const ng = G.offerLap(S.INFO.id, lap, ghost);
+      const ng = G.offerLap(ghostId(), lap, ghost);
       if (ng) { ghost = ng; pbLap = p.lastLap; }
     }
     ghostBase = SL + Math.floor((p.dist - SL) / L) * L;
@@ -1269,6 +1376,7 @@ function updateHUD(dt) {
   if (gd === null) ge.classList.remove('on');
   else { ge.classList.add('on'); ge.lastChild.textContent = (gd < 0 ? '−' : '+') + Math.abs(gd).toFixed(2); ge.classList.toggle('ahead', gd < 0); }
   $('hMph').textContent = Math.round(p.v * S.MPH);
+  updateWindHUD();
   $('btnLift').classList.toggle('cue', race.phase === 'green' && !p.finished && S.needBrake(p));
   $('hDraft').style.width = Math.round(clamp(p.draft * 1.15, 0, 1) * 100) + '%';
   // spotter
@@ -1280,7 +1388,7 @@ function updateHUD(dt) {
 
 function handleEvents() {
   for (const e of race.events) {
-    if (e.type === 'green') { if (!flagbar.classList.contains('on')) showBanner('GREEN  GREEN  GREEN!', 'green', 2.2); setTimeout(() => hint.classList.remove('on'), 4000); theme.volume = 0.0; playTheme(false); }
+    if (e.type === 'green') { if (race.daily && race.daily.official) dailyMarkUsed(race.daily.key); if (!flagbar.classList.contains('on')) showBanner('GREEN  GREEN  GREEN!', 'green', 2.2); setTimeout(() => hint.classList.remove('on'), 4000); theme.volume = 0.0; playTheme(false); }
     else if (e.type === 'wall' && e.car === race.player.id) { shake = 0.25 + Math.min(0.4, e.impact * 0.1); carFrame(race.player.dist, race.player.d + (e.inside ? -1 : 1), 0, tmpF); spawnSparks(tmpF.pos.x, tmpF.pos.y + 0.3, tmpF.pos.z, tmpF.fwd.x * race.player.v * 0.8, tmpF.fwd.z * race.player.v * 0.8, 24); buzz(e.impact > 2.5 ? 'crash' : 'wall'); wallSmoke(e); coachEvent(e); }
     else if ((e.type === 'bump' || e.type === 'rub')) { shake = Math.max(shake, 0.12); contactSmoke(e.type === 'bump'); if (e.type === 'bump') buzz('wall'); }
     else if (e.type === 'spin' && e.car === race.player.id) { showBanner('SPIN!', 'gold', 1.4); buzz('crash'); coachEvent(e); }
@@ -1288,7 +1396,7 @@ function handleEvents() {
     else if (e.type === 'lap') {
       coachEvent(e);
       const p = race.player, left = race.opts.laps - e.lap;
-      const best = p.bestLap === e.time, pb = best && saveBest(S.INFO.id, e.time);
+      const best = p.bestLap === e.time, pb = best && !race.daily && saveBest(S.INFO.id, e.time);
       if (pb || pbLap === e.time) buzz('best');
       if (left === 1) showBanner((pb ? 'PERSONAL BEST ' + fmt(e.time) + ' · ' : '') + 'WHITE FLAG · FINAL LAP', pb ? 'gold' : 'white', 2.2);
       else showBanner('LAP ' + e.lap + '  ' + fmt(e.time) + (pb ? '  PERSONAL BEST' : best ? '  BEST' : ''), best ? 'gold' : 'white', 1.8);
@@ -1303,6 +1411,8 @@ function handleEvents() {
 function showFinish() {
   if (!race || finishShown) return; finishShown = true;
   const p = race.player, pos = p.finishPos;
+  if (race.daily) { showDailyFinish(p, pos); return; }
+  $('btnAgain').textContent = 'Race again';
   if (race.tt) {
     // time trial result: your best lap, every lap, and the ghost
     const I = S.INFO, pb = saveBest(I.id, p.bestLap);

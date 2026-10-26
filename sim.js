@@ -268,9 +268,35 @@ const ROW_GAP = 15;
 
 function rng(seed) { let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
+// ---------- Daily Challenge conditions (null in every normal race, so normal-mode physics are untouched) ----------
+// grip: 0.95..1.03 multiplier on cornering grip (road course) and a matching change to the ovals' corner scrub.
+// wind: mph and the angle it blows relative to the front stretch's direction of travel (0 = tailwind there,
+// 180 = headwind); gust: 0..0.5, how much it rises and falls. Wind changes top speed along the track
+// (a headwind costs a bit more than a tailwind gives).
+export let COND = null;
+function makeCond(c, T) {
+  if (!c) return null;
+  const grip = clamp(+c.grip || 1, 0.85, 1.1), mph = clamp(+c.windMph || 0, 0, 30), gust = clamp(+c.gust || 0, 0, 0.6);
+  const j = Math.round(S_LINE / T.DS) % T.n, fx = T.TX[j], fz = T.TZ[j], a = (+c.windDeg || 0) * DEG;
+  const w = mph / MPH; // m/s
+  return { grip, gs: Math.sqrt(grip), scrubK: 1 + (1 - grip) * 6, mph, gust, deg: +c.windDeg || 0,
+    wx: w * (Math.cos(a) * fx - Math.sin(a) * fz), wz: w * (Math.sin(a) * fx + Math.cos(a) * fz) };
+}
+// gust factor at race time t (deterministic: same for everyone at the same moment of the race)
+export function gustAt(t) { return COND ? 1 + COND.gust * (0.6 * Math.sin(t * 0.83 + 1.3) + 0.4 * Math.sin(t * 0.29 + 0.4)) : 1; }
+// wind along the track at s (m/s, + = tailwind) and across it (+ = toward the car's right)
+export function windAt(s, t, out = {}) {
+  out.along = 0; out.across = 0; if (!COND || !COND.mph) return out;
+  const i = Math.round(wrap(s) / DS) % TRACK.n, tx = TRACK.TX[i], tz = TRACK.TZ[i], g = gustAt(t);
+  out.along = (COND.wx * tx + COND.wz * tz) * g; out.across = (COND.wx * -tz + COND.wz * tx) * g; return out;
+}
+const safeV = (s) => COND ? safeSpeedAt(s) * COND.gs : safeSpeedAt(s);
+const WTMP = {};
+
 export function createRace(o = {}) {
   const opts = Object.assign({ laps: 10, field: 33, grid: 11, difficulty: 'pro', assist: true, autoThrottle: true, seed: 7 }, o);
   if (opts.track) setTrack(opts.track);
+  COND = makeCond(opts.cond, TRACK);
   const R = rng(opts.seed);
   const n = Math.max(2, Math.min(33, opts.field | 0));
   const pIdx = clamp((opts.grid | 0) - 1, 0, n - 1);
@@ -338,7 +364,8 @@ function vMaxFor(race, c) {
   const f = turnF(s);
   let v = V_TOP * c.pace;
   if (!c.isPlayer && !race.finishedAll) v *= 1 + 0.004 * Math.sin(race.t * c.wobF + c.wob);
-  v *= 1 - INFO.scrub * f;                  // cornering scrub on the ovals (~222 mph in Indy's turns)
+  v *= 1 - INFO.scrub * f * (COND ? COND.scrubK : 1); // cornering scrub on the ovals (~222 mph in Indy's turns)
+  if (COND && COND.mph) { const w = windAt(s, race.t, WTMP).along * MPH; v *= 1 + (w > 0 ? 0.0009 : 0.0013) * w; } // daily wind
   v *= 1 + DRAFT_MAX * c.draft;
   const din = dIn(s), dout = dOut(s), road = INFO.kind === 'road';
   const kerb = road ? 1.0 : 0.3, grass = road ? 0.3 : 0.55;
@@ -355,14 +382,14 @@ export function autopilotInput(race, c, look = 0.45) {
   const latWanted = clamp((tgt - c.d) * 1.6, -6, 6);
   const psiMax = steerMax(c.v);
   const u = clamp(Math.asin(clamp(latWanted / Math.max(c.v, 5), -0.99, 0.99)) / psiMax, -1, 1);
-  const brake = INFO.kind === 'road' && c.v > safeSpeedAt(s + c.v * 0.12) + 0.3 ? 1 : 0;
+  const brake = INFO.kind === 'road' && c.v > safeV(s + c.v * 0.12) + 0.3 ? 1 : 0;
   return { steer: u, throttle: 1, brake };
 }
 
 // true when the car is carrying more speed than it can brake down from for what's coming (the HUD's BRAKE cue)
-export function needBrake(c) { return INFO.kind === 'road' && c.v > safeSpeedAt(wrap(c.dist) + c.v * 0.25) + 1.5; }
+export function needBrake(c) { return INFO.kind === 'road' && c.v > safeV(wrap(c.dist) + c.v * 0.25) + 1.5; }
 // the same test looking a little further ahead: true `lead` seconds before the BRAKE cue lights (the coach's early call)
-export function brakeSoon(c, lead) { return INFO.kind === 'road' && c.v > safeSpeedAt(wrap(c.dist) + c.v * (0.25 + lead)) + 1.5; }
+export function brakeSoon(c, lead) { return INFO.kind === 'road' && c.v > safeV(wrap(c.dist) + c.v * (0.25 + lead)) + 1.5; }
 // debugging / screenshots: spin the player now
 export function forceSpin(race, dir = 1) { const c = race.player; if (!c.spin) startSpin(race, c, dir); }
 
@@ -416,6 +443,7 @@ function stepPlayer(race, c, dt, inp) {
   let grip = 0, demand = 0, r = 0;
   if (road) {
     grip = gripAt(c.v) * (lifting ? H.liftGrip : 1) * (c.recover ? 1.12 : 1);
+    if (COND) grip *= COND.grip;
     demand = Math.abs(k) * c.v * c.v; r = demand / grip;
   }
   let a;
@@ -549,7 +577,8 @@ function stepAI(race, c, dt) {
   let a = ACC * (1 - (c.v / vmax) * (c.v / vmax)) * (c.v > vmax ? 0.8 : 1);
   // road course: brake for the corner coming up (the profile already holds the braking distance)
   if (INFO.kind === 'road') {
-    const vp = profAt(s + c.v * 0.08) * (0.985 + 0.5 * (c.pace - 1)) * (1 + 0.02 * c.draft);
+    let vp = profAt(s + c.v * 0.08) * (0.985 + 0.5 * (c.pace - 1)) * (1 + 0.02 * c.draft);
+    if (COND) vp *= COND.gs;
     if (c.v > vp) a = Math.min(a, -brakeDecel(INFO, c.v) * clamp((c.v - vp) / 1.5, 0.2, 1));
   }
   // don't rear-end the car ahead when boxed in

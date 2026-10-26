@@ -18,6 +18,15 @@ Track shapes come from OpenStreetMap raceway geometry (© OpenStreetMap contribu
 ## Online leaderboard
 Top 10 per board, arcade style. After a finished race (one board per track: `indy`, `texas`, `road`; best lap of the race, faster is better) that makes the top 10, the game asks for 3-letter initials (big ▲/▼ spinners, or type on a keyboard), submits, and shows the board with your entry highlighted. There's also a 🏆 Leaderboard button on the title screen and the finish card (🏆). `leaderboard.js` is the shared client (the same file in all three games). It talks to the Game Day Garage API at `https://gamedaygarage.sites.tab.bot/api`. If the API can't be reached, nothing in the game breaks: no entry screen shows, and the button says the board is offline. The local best score is still kept on the phone as before.
 
+## Daily Challenge
+One seeded race a day, the same for everyone, picked from the New York date (`daily.js`, seed = YYYYMMDD; it rolls over at midnight ET):
+- **Track** (one of the three, never the same two days running), **laps**, **mode** (race the field, or about one day in four a time trial), **grid spot**, **field size** and **opponent level**.
+- **Conditions**: time of day (midday sun, golden hour or overcast: a look only), **wind** (speed and direction relative to the front stretch, with gusts; a headwind lowers top speed, a tailwind raises it, and the HUD shows a WIND arrow) and **grip** (green track, normal, or rubbered in). These live in `sim.js` as `COND`, which is `null` in every normal race, so normal-mode physics, lap times and the per-track boards are exactly as before (a test checks a normal race is bit-for-bit unchanged after a daily one).
+- **Score**: your best lap of the run in seconds, lower is better, like the main boards. It posts to board `daily-YYYYMMDD` on the Game Day Garage API.
+- **One counted run per day per phone** (`localStorage` key `ktb-daily-v1`): the run counts once the green flag drops. Every run after that is practice and never posts. Daily laps never touch your normal personal bests or track ghosts; the day has its own ghost (`ktb-ghost-daily-YYYYMMDD`, older days are cleaned up).
+- The title screen shows the date, today's challenge, whether your counted run is used, and a countdown to the next one. 🏆 on the card opens today's top 10; the Leaderboard has a Daily tab too.
+- `?daily=YYYYMMDD` previews another day (practice only).
+
 ## Ghost car & Time Trial
 Your best lap on each track is recorded (position + heading 15 times a second, delta-packed, about 4 KB) and saved on the phone under `ktb-ghost-<track>`. On that track a translucent blue ghost car replays it, the HUD shows the gap to it (green when you're ahead), and it shows as a dot on the minimap. Settings → Ghost car turns it off. The track picker has a Race / Time Trial switch: Time Trial is you and your ghost alone, no traffic; laps still count for the same best-lap leaderboard. `ghost.js` holds the recorder/player.
 
@@ -33,4 +42,4 @@ Your best lap on each track is recorded (position + heading 15 times a second, d
 The race physics (`sim.js`) are unchanged, so lap times and the leaderboard compare with earlier versions.
 
 ## Build
-The live site serves a single bundled `game.js`, made with `esbuild game.js --bundle --minify --format=iife --target=es2020 --outfile=dist/game.js`. Put `leaderboard.js`, `index.html`, `styles.css`, `gdg-badge.png` and the media next to it (`carmodel.js`, `gfx.js`, `ghost.js` and `haptics.js` are bundled into `game.js`). The unbundled files in this repo also run as-is from any static server.
+The live site serves a single bundled `game.js`, made with `esbuild game.js --bundle --minify --format=iife --target=es2020 --outfile=dist/game.js`. Put `leaderboard.js`, `index.html`, `styles.css`, `gdg-badge.png` and the media next to it (`carmodel.js`, `gfx.js`, `ghost.js`, `haptics.js` and `daily.js` are bundled into `game.js`). The unbundled files in this repo also run as-is from any static server.
