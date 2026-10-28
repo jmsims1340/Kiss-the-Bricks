@@ -922,7 +922,7 @@ function startRace() {
   race = sp
     ? S.createRace({ track: sp.track, laps: sp.laps, field: tt ? 2 : sp.field, grid: tt ? 1 : sp.grid, difficulty: sp.difficulty, assist: cfg.assist, autoThrottle: cfg.throttle === 'auto', seed: +sp.key, cond: sp.cond, setup: setupOf(sp.track) / 10 })
     : S.createRace({ track: cfg.track, laps: cfg.laps, field: tt ? 2 : cfg.field, grid: tt ? 1 : Math.min(cfg.grid, cfg.field), difficulty: cfg.difficulty, assist: cfg.assist, autoThrottle: cfg.throttle === 'auto', seed: (Math.random() * 1e9) | 0, setup: setupOf(cfg.track) / 10 });
-  race.setupN = setupOf(S.TRACK_ID);
+  race.setupN = setupOf(S.TRACK_ID); updateSetupLabels();
   race.daily = dly ? { key: sp.key, official: dly.official } : null;
   document.body.classList.toggle('isdaily', !!dly);
   // time trial: just you, the pace car to the green, and your ghost
