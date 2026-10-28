@@ -12,7 +12,7 @@
 <title>Kiss the Bricks</title>
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="apple-touch-icon.png">
-<link rel="stylesheet" href="styles.css?v=daily1">
+<link rel="stylesheet" href="styles.css?v=setup1">
 </head>
 <body>
 <canvas id="gl" aria-label="Race view"></canvas>
@@ -75,7 +75,7 @@
       </button>
       <button id="btnDailyBoard" class="dboard" aria-label="Today's Daily leaderboard">🏆</button>
     </div>
-    <div class="btnrow2"><button id="btnSettings" class="ghost">Settings</button><button id="btnBoard" class="ghost">🏆 Leaderboard</button></div>
+    <div class="btnrow2"><button id="btnSettings" class="ghost">Settings</button><button id="btnTitleSetup" class="ghost">&#9881; Setup</button><button id="btnBoard" class="ghost">🏆 Leaderboard</button></div>
     <p class="tip">Drag a thumb left/right anywhere to steer. Tuck in behind a car to catch the draft, then pull out and pass.</p>
   </div>
 </section>
@@ -85,6 +85,7 @@
     <div class="thead"><button id="btnTrackBack" class="ghost tback" aria-label="Back">&#8249; Back</button><h2>Pick your track</h2></div>
     <div class="seg modeseg" data-key="mode" role="radiogroup" aria-label="Mode"><button data-v="race">🏁 Race the field</button><button data-v="tt">⏱ Time trial + ghost</button></div>
     <div id="trackList" class="tlist"></div>
+    <button id="btnSetup" class="ghost subtn"><span class="suico" aria-hidden="true">&#9881;</span><span class="sul">Car setup</span><span id="setupSum" class="susum"></span><span class="suchev" aria-hidden="true">&#8250;</span></button>
   </div>
 </section>
 
@@ -114,9 +115,58 @@
     <h2>Paused</h2>
     <button id="btnResume" class="big">Resume</button>
     <button id="btnRestart" class="ghost">Restart race</button>
+    <button id="btnPauseSetup" class="ghost">Car setup <span id="pauseSetup" class="pausesu"></span></button>
     <button id="btnPauseSettings" class="ghost">Settings</button>
     <button id="btnQuit" class="ghost">Quit to menu</button>
     <a class="ghost gdglink" href="https://gamedaygarage.sites.tab.bot/"><span class="chev" aria-hidden="true">‹</span><img src="gdg-badge.png" alt="" width="20" height="22">Game Day Garage</a>
+  </div>
+</section>
+
+<section id="setup" class="screen sheet hidden" aria-label="Car setup">
+  <div class="card setupcard">
+    <div class="suhead"><h2>Car setup</h2><span id="suTrack" class="sutrack"></span></div>
+    <div class="seg suseg" id="suTracks" role="radiogroup" aria-label="Track"><button data-t="indy">Indy Oval</button><button data-t="texas">Texas</button><button data-t="road">Road Course</button></div>
+    <div class="subody">
+      <div class="sugfx"><svg viewBox="0 0 200 210" class="sucar" role="img" aria-label="Car from above in a left-hand corner">
+  <defs>
+    <linearGradient id="suBody" x1="0" x2="1"><stop offset="0" stop-color="#b98a12"/><stop offset=".45" stop-color="#f6cf4a"/><stop offset=".55" stop-color="#f2c230"/><stop offset="1" stop-color="#9c740c"/></linearGradient>
+    <linearGradient id="suCarbon" x1="0" x2="1"><stop offset="0" stop-color="#121316"/><stop offset=".5" stop-color="#2c2f36"/><stop offset="1" stop-color="#121316"/></linearGradient>
+    <marker id="suArrP" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#5fb0ff"/></marker>
+    <marker id="suArrL" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#ff8a3d"/></marker>
+  </defs>
+  <path d="M150 210 C150 120 130 60 30 20" class="sulane"/>
+  <path d="M60 210 C60 150 50 110 -10 80" class="sulane in"/>
+  <path d="M104 196 C104 120 90 70 22 44" class="suline"/>
+  <g id="suPush" class="supush"><path d="M104 64 L132 6" marker-end="url(#suArrP)"/><text x="134" y="34">PUSH</text></g>
+  <g id="suCarG" transform="rotate(0 104 116)">
+    <g id="suRot" class="surot"><path d="M88 166 A40 40 0 0 0 138 170" marker-end="url(#suArrL)"/><text x="122" y="198">TAIL OUT</text></g>
+    <rect x="80" y="66" width="48" height="7" rx="2" fill="url(#suCarbon)"/>
+    <rect id="suTFL" class="sutire" x="78" y="78" width="11" height="20" rx="3"/>
+    <rect id="suTFR" class="sutire" x="119" y="78" width="11" height="20" rx="3"/>
+    <rect id="suTRL" class="sutire" x="74" y="136" width="13" height="24" rx="3"/>
+    <rect id="suTRR" class="sutire" x="121" y="136" width="13" height="24" rx="3"/>
+    <path d="M100 62 L108 62 L110 96 L118 108 L120 150 L114 162 L94 162 L88 150 L90 108 L98 96 Z" fill="url(#suBody)" stroke="#0007" stroke-width="1"/>
+    <path d="M90 112 L84 116 L84 146 L90 150 Z M118 112 L124 116 L124 146 L118 150 Z" fill="url(#suCarbon)"/>
+    <ellipse cx="104" cy="118" rx="5" ry="9" fill="#0d0e10"/>
+    <path d="M97 109 Q104 101 111 109" stroke="#20232a" stroke-width="2.4" fill="none"/>
+    <rect x="84" y="164" width="40" height="8" rx="2" fill="url(#suCarbon)"/>
+    <rect x="93" y="62" width="22" height="3" rx="1.5" fill="#f2c230" opacity=".7"/>
+  </g>
+</svg></div>
+      <div class="sumain">
+        <div class="suval"><b id="suVal">NEUTRAL</b><span id="suKind">Balanced</span></div>
+        <div class="suslider">
+          <div class="subar" aria-hidden="true"><span id="suFill" class="sufill"></span><span class="sumid"></span></div>
+          <input id="suRange" type="range" min="-13" max="13" step="1" value="0" aria-label="Handling balance, tight to loose" aria-valuetext="Neutral">
+          <div class="suends" aria-hidden="true"><span>&#9664; TIGHT</span><span class="c">NEUTRAL</span><span>LOOSE &#9654;</span></div>
+        </div>
+        <p id="suDesc" class="sudesc"></p>
+        <p id="suTip" class="sutip"></p>
+      </div>
+    </div>
+    <p id="suNote" class="note"></p>
+    <button id="suRestart" class="ghost surestart hidden">Restart with this setup</button>
+    <div class="btnrow surow"><button id="suReset" class="ghost">Reset to neutral</button><button id="suDone" class="big">Done</button></div>
   </div>
 </section>
 
@@ -136,6 +186,6 @@
 <div id="loading" class="loading">Loading the track…</div>
 <audio id="theme" src="theme.m4a" loop preload="auto"></audio>
 <script src="leaderboard.js"></script>
-<script type="module" src="game.js?v=daily1"></script>
+<script type="module" src="game.js?v=setup1"></script>
 </body>
 </html>

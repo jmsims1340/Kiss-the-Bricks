@@ -291,12 +291,56 @@ export function windAt(s, t, out = {}) {
   out.along = (COND.wx * tx + COND.wz * tz) * g; out.across = (COND.wx * -tz + COND.wz * tx) * g; return out;
 }
 const safeV = (s) => COND ? safeSpeedAt(s) * COND.gs : safeSpeedAt(s);
+
+// ---------- Car setup: one TIGHT <-> LOOSE balance slider (null at center, so the default car is untouched) ----------
+// bal runs -1 (full tight) .. 0 (the car as it always was) .. +1 (full loose), player's car only.
+//  TIGHT = understeer / push: less front bite (slower, lazier turn-in, the nose pushes up the track), more rear grip
+//          (harder to spin, better traction off the corner).
+//  LOOSE = oversteer: more front bite (quick turn-in, little push), less rear grip (the tail steps out, traction
+//          control cuts in earlier on exit, lifting mid-corner can snap it round; past about 60% loose it can spin).
+// Corner speed: each kind of corner has an ideal balance. Fast, high-load corners (the ovals, the sweepers) want
+// the car a touch tight so it stays planted; slow, tight corners want it a bit loose so it rotates. The further the
+// slider sits from a corner's ideal, the more speed that corner costs. So no setting is fastest everywhere.
+export let SETUP = null;
+export const SETUP_IDEAL = { indy: -0.3, texas: 0.15, roadSlow: 0.5, roadFast: -0.3 };
+export const SETUP_K = { oval: 1.0, road: 0.06 };
+function makeSetup(bal) {
+  let b = +bal || 0; b = clamp(b, -1, 1);
+  if (Math.abs(b) < 1e-6) return null;
+  const road = INFO.kind === 'road', id = road ? 0 : (SETUP_IDEAL[TRACK_ID] || 0);
+  const lo = Math.max(0, b), ti = Math.max(0, -b);
+  return {
+    bal: b,
+    tau: 0.11 * (1 - 0.32 * b),          // steering response: tight lazier, loose sharper
+    steer: 1 + 0.12 * b,                 // front bite: how much the car will turn for full lock
+    push: 1 - 0.6 * b,                   // understeer drift up the track in the turns
+    scrubK: road ? 1 : 1 + SETUP_K.oval * ((b - id) * (b - id) - id * id), // oval corner speed
+    slideWide: 1 - 0.7 * b,              // past the limit: tight runs wide, loose holds the line but rotates
+    spinR: 1.25 - 0.15 * b,               // how far past the limit before the slip meter fills
+    fill: 1 + 0.5 * lo - 0.35 * ti,
+    liftFill: 1 + 1.4 * lo,              // lift-off oversteer on a loose car
+    tcR: 0.99 - 0.035 * lo + 0.02 * ti,   // traction off the corner
+    yawK: 1 + 0.9 * b,                   // how far the tail steps out when it slides
+    ovalLoose: Math.max(0, b - 0.25) / 0.75, // rear snap risk on the ovals
+  };
+}
+// road-course cornering grip multiplier at speed v (1 at center)
+export function setupGrip(v) {
+  if (!SETUP || INFO.kind !== 'road') return 1;
+  const w = clamp((v - 35) / 40, 0, 1), id = SETUP_IDEAL.roadSlow + (SETUP_IDEAL.roadFast - SETUP_IDEAL.roadSlow) * w, b = SETUP.bal;
+  return 1 - SETUP_K.road * ((b - id) * (b - id) - id * id);
+}
+// the player's safe speed (brake cue, coach, autopilot): the setup's corner grip moves it with the car
+const safeVP = (s) => { const v = safeV(s); return SETUP ? v * Math.sqrt(setupGrip(v)) : v; };
+// setup label for the UI: 'T7' .. 'NEUTRAL' .. 'L4'
+export function setupLabel(b) { const n = Math.round(clamp(+b || 0, -1, 1) * 10); return n === 0 ? 'NEUTRAL' : (n < 0 ? 'T' : 'L') + Math.abs(n); }
 const WTMP = {};
 
 export function createRace(o = {}) {
   const opts = Object.assign({ laps: 10, field: 33, grid: 11, difficulty: 'pro', assist: true, autoThrottle: true, seed: 7 }, o);
   if (opts.track) setTrack(opts.track);
   COND = makeCond(opts.cond, TRACK);
+  SETUP = makeSetup(opts.setup);
   const R = rng(opts.seed);
   const n = Math.max(2, Math.min(33, opts.field | 0));
   const pIdx = clamp((opts.grid | 0) - 1, 0, n - 1);
@@ -364,7 +408,7 @@ function vMaxFor(race, c) {
   const f = turnF(s);
   let v = V_TOP * c.pace;
   if (!c.isPlayer && !race.finishedAll) v *= 1 + 0.004 * Math.sin(race.t * c.wobF + c.wob);
-  v *= 1 - INFO.scrub * f * (COND ? COND.scrubK : 1); // cornering scrub on the ovals (~222 mph in Indy's turns)
+  v *= 1 - INFO.scrub * f * (COND ? COND.scrubK : 1) * (SETUP && c.isPlayer ? SETUP.scrubK : 1); // cornering scrub on the ovals (~222 mph in Indy's turns)
   if (COND && COND.mph) { const w = windAt(s, race.t, WTMP).along * MPH; v *= 1 + (w > 0 ? 0.0009 : 0.0013) * w; } // daily wind
   v *= 1 + DRAFT_MAX * c.draft;
   const din = dIn(s), dout = dOut(s), road = INFO.kind === 'road';
@@ -382,14 +426,14 @@ export function autopilotInput(race, c, look = 0.45) {
   const latWanted = clamp((tgt - c.d) * 1.6, -6, 6);
   const psiMax = steerMax(c.v);
   const u = clamp(Math.asin(clamp(latWanted / Math.max(c.v, 5), -0.99, 0.99)) / psiMax, -1, 1);
-  const brake = INFO.kind === 'road' && c.v > safeV(s + c.v * 0.12) + 0.3 ? 1 : 0;
+  const brake = INFO.kind === 'road' && c.v > (c.isPlayer ? safeVP : safeV)(s + c.v * 0.12) + 0.3 ? 1 : 0;
   return { steer: u, throttle: 1, brake };
 }
 
 // true when the car is carrying more speed than it can brake down from for what's coming (the HUD's BRAKE cue)
-export function needBrake(c) { return INFO.kind === 'road' && c.v > safeV(wrap(c.dist) + c.v * 0.25) + 1.5; }
+export function needBrake(c) { return INFO.kind === 'road' && c.v > safeVP(wrap(c.dist) + c.v * 0.25) + 1.5; }
 // the same test looking a little further ahead: true `lead` seconds before the BRAKE cue lights (the coach's early call)
-export function brakeSoon(c, lead) { return INFO.kind === 'road' && c.v > safeV(wrap(c.dist) + c.v * (0.25 + lead)) + 1.5; }
+export function brakeSoon(c, lead) { return INFO.kind === 'road' && c.v > safeVP(wrap(c.dist) + c.v * (0.25 + lead)) + 1.5; }
 // debugging / screenshots: spin the player now
 export function forceSpin(race, dir = 1) { const c = race.player; if (!c.spin) startSpin(race, c, dir); }
 
@@ -429,13 +473,13 @@ function stepSpin(race, c, dt, k, s) {
 
 function stepPlayer(race, c, dt, inp) {
   const s = wrap(c.dist), k = kappaAt(s), din = dIn(s), dout = dOut(s);
-  const road = INFO.kind === 'road', H = HANDLING;
+  const road = INFO.kind === 'road', H = HANDLING, SU = SETUP;
   if (c.yaw === undefined) { c.yaw = 0; c.slip = 0; c.recover = 0; c.spin = null; c.skid = 0; c.slipR = 0; }
   if (c.spin) { c.slide = 0; stepSpin(race, c, dt, k, s); walls(race, c, dt, s); return; }
   if (c.recover) c.recover = Math.max(0, c.recover - dt);
   const u = clamp(inp.steer || 0, -1, 1);
-  const psiT = u * steerMax(c.v);
-  c.psi += (psiT - c.psi) * (1 - Math.exp(-dt / 0.11));
+  const psiT = u * steerMax(c.v) * (SU ? SU.steer : 1);
+  c.psi += (psiT - c.psi) * (1 - Math.exp(-dt / (SU ? SU.tau : 0.11)));
   // longitudinal
   const vmax = vMaxFor(race, c);
   const thr = race.opts.autoThrottle ? (inp.brake ? 0 : 1) : (inp.throttle ? 1 : 0);
@@ -444,6 +488,7 @@ function stepPlayer(race, c, dt, inp) {
   if (road) {
     grip = gripAt(c.v) * (lifting ? H.liftGrip : 1) * (c.recover ? 1.12 : 1);
     if (COND) grip *= COND.grip;
+    if (SU) grip *= setupGrip(c.v);
     demand = Math.abs(k) * c.v * c.v; r = demand / grip;
   }
   let a;
@@ -452,12 +497,12 @@ function stepPlayer(race, c, dt, inp) {
     a = ACC * (1 - (c.v / vmax) * (c.v / vmax)) * (c.v > vmax ? 0.8 : 1);
     if (c.recover && a > 0) a *= 0.55;                                            // smooth back on the power after a spin
     // traction control (auto throttle or assist): don't power the car past the grip it has mid-corner
-    if (road && a > 0 && (race.opts.autoThrottle || race.opts.assist)) a *= clamp((H.tcR - r) / 0.08, 0, 1);
+    if (road && a > 0 && (race.opts.autoThrottle || race.opts.assist)) a *= clamp(((SU ? SU.tcR : H.tcR) - r) / 0.08, 0, 1);
   }
   else a = -2.2 - 2.2 * (c.v / V_TOP) * (c.v / V_TOP);
   c.v = Math.max(0, c.v + a * dt);
   // lateral: steering, push (understeer) in the turns, light assist
-  const push = k * c.v * c.v * 0.06;
+  const push = k * c.v * c.v * 0.06 * (SU ? SU.push : 1);
   let lat = c.v * Math.sin(c.psi) + push;
   if (race.opts.assist) {
     const idle = 1 - Math.min(1, Math.abs(u) * 1.6);
@@ -475,16 +520,28 @@ function stepPlayer(race, c, dt, inp) {
   if (road) {
     const excess = demand - grip * (1 - H.falloff * clamp((r - 1) / 0.5, 0, 1));   // gentle fall-off past the limit
     if (excess > 0) {
-      lat += Math.sign(k) * excess * H.slideWide * (race.opts.assist ? 0.8 : 1);
+      lat += Math.sign(k) * excess * H.slideWide * (SU ? SU.slideWide : 1) * (race.opts.assist ? 0.8 : 1);
       c.v = Math.max(0, c.v - Math.min(H.scrubCap * grip, excess * (H.scrub + H.scrubK * Math.min(1, r - 1))) * (lifting ? 1.3 : 1) * dt); c.slide = excess;
     }
-    if (r > H.spinR && !c.recover) c.slip += dt * (r - H.spinR) * H.fill * (lifting ? H.liftFill : 1) * (race.opts.assist ? H.assistFill : 1);
+    const spinR = SU ? SU.spinR : H.spinR;
+    if (r > spinR && !c.recover) c.slip += dt * (r - spinR) * H.fill * (SU ? SU.fill : 1) * (lifting ? H.liftFill * (SU ? SU.liftFill : 1) : 1) * (race.opts.assist ? H.assistFill : 1);
     else c.slip = Math.max(0, c.slip - dt * (lifting ? H.drainLift : H.drain));
     if (c.slip >= 1) { startSpin(race, c, -Math.sign(k) || 1); c.latV = lat; c.d += lat * dt; c.dist += c.v * dt; walls(race, c, dt, s); return; }
     // the tail steps out as the slide grows (the renderer draws the heading as psi + yaw)
-    if (r > 1.04) yawT = -Math.sign(k) * Math.min(0.34, (r - 1.04) * 0.8 + c.slip * 0.18);
+    if (r > 1.04) yawT = -Math.sign(k) * Math.min(0.34, ((r - 1.04) * 0.8 + c.slip * 0.18) * (SU ? clamp(SU.yawK, 0.2, 1.9) : 1));
     c.skid = clamp((r - 1.06) * 2.2 + c.slip * 0.6, 0, 1) * clamp(c.v / 20, 0, 1);
+  } else if (SU) {
+    // ovals: a tight car's nose points in while it pushes up the track; a loose car's tail hangs out and,
+    // well past center, lifting or yanking the wheel mid-corner can snap it round
+    const f = turnF(s), load = f * (c.v / V_TOP) * (c.v / V_TOP), du = Math.abs(u - (c.uPrev === undefined ? u : c.uPrev)) / dt;
+    const stress = SU.ovalLoose * load * (0.9 * Math.abs(u) + (lifting ? 0.8 : 0) + Math.min(du, 8) * 0.12);
+    if (stress > 0.32 && !c.recover) c.slip += dt * (stress - 0.32) * 2.4 * (race.opts.assist ? 0.75 : 1);
+    else c.slip = Math.max(0, c.slip - dt * 0.9);
+    if (c.slip >= 1) { c.uPrev = u; startSpin(race, c, -Math.sign(k) || 1); c.latV = lat; c.d += lat * dt; c.dist += c.v * dt; walls(race, c, dt, s); return; }
+    yawT = -Math.sign(k) * (0.055 * SU.bal * load + c.slip * 0.24);
+    c.skid = clamp(c.slip * 1.3 - 0.12, 0, 1) * clamp(c.v / 20, 0, 1);
   }
+  if (SU) c.uPrev = u;
   c.yaw += (yawT - c.yaw) * (1 - Math.exp(-dt / 0.14));
   c.latV = lat;
   c.d += lat * dt;

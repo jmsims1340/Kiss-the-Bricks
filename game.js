@@ -727,6 +727,90 @@ function buildTrackCards() {
 }
 $('btnTrackBack').addEventListener('click', () => { show('tracks', false); show('title', true); });
 
+// ---------------- Car setup: one TIGHT <-> LOOSE slider, saved per track ----------------
+// -10 (full tight) .. 0 (neutral, the car as it always was) .. +10 (full loose). sim.js does the physics.
+// The slider has a detent: the middle few positions of the input all read NEUTRAL, so it snaps to center.
+const SETUP_STORE = 'ktb-setup-v1';
+let setups = {};
+try { const v = JSON.parse(localStorage.getItem(SETUP_STORE) || '{}'); if (v && typeof v === 'object') setups = v; } catch (e) {}
+function setupOf(id) { const n = Math.round(+setups[id] || 0); return n < -10 ? -10 : n > 10 ? 10 : n; }
+function setupSave(id, n) { if (n) setups[id] = n; else delete setups[id]; try { localStorage.setItem(SETUP_STORE, JSON.stringify(setups)); } catch (e) {} }
+const SU_DET = 3;                                   // detent half-width, in input steps
+const suToN = (raw) => { const a = Math.abs(raw); return a <= SU_DET ? 0 : Math.sign(raw) * (a - SU_DET); };
+const nToSu = (n) => n === 0 ? 0 : Math.sign(n) * (Math.abs(n) + SU_DET);
+const suLabel = (n) => S.setupLabel(n / 10);
+const SU_TIP = {
+  indy: 'Engineer: Indy\u2019s four turns are flat and fast. Most drivers run it a touch tight here so it sticks flat out.',
+  texas: 'Engineer: the 24\u00b0 banking holds the car down, so you can run Texas near neutral, even a click or two loose.',
+  road: 'Engineer: the slow infield corners like a bit of loose for rotation. Too loose and it\u2019ll spin when you brake late.',
+};
+function suDesc(n) {
+  const a = Math.abs(n);
+  if (!n) return 'Neutral: the car you\u2019ve always raced. Front and rear let go together.';
+  if (n < 0) return a <= 3 ? 'A touch tight: the nose washes out a little in the turns, the rear stays planted. Safe on corner exit.'
+    : a <= 7 ? 'Tight: pushes up the track in the turns. Lazier turn-in and it needs more wheel, but the rear won\u2019t come around.'
+    : 'Very tight: heavy push. It plows toward the wall unless you hold it down, and it\u2019s nearly impossible to spin.';
+  return a <= 3 ? 'A touch loose: sharper turn-in and the car rotates nicely through slow corners. The rear is a little lighter.'
+    : a <= 7 ? 'Loose: quick to turn and the tail hangs out. Traction is shorter off the corners, so be smooth on the wheel.'
+    : 'Very loose: the rear steps out under load. Lifting or yanking the wheel mid-corner can spin it.';
+}
+function suKind(n) { const a = Math.abs(n); return !n ? 'Balanced' : (a <= 3 ? 'A touch ' : a <= 7 ? '' : 'Very ') + (n < 0 ? 'tight' : 'loose'); }
+function setupSummary() { return S.TRACK_IDS.map((id) => (id === 'indy' ? 'Indy ' : id === 'texas' ? 'Texas ' : 'Road ') + (setupOf(id) ? suLabel(setupOf(id)) : 'N')).join(' \u00b7 '); }
+let suTrack = 'indy', suFrom = 'tracks';
+function renderSetup() {
+  const n = setupOf(suTrack), I = S.TRACK_INFO[suTrack];
+  const rng = $('suRange'); if (suToN(+rng.value) !== n) rng.value = nToSu(n);
+  const v = $('suVal'); v.textContent = suLabel(n); v.className = n < 0 ? 't' : n > 0 ? 'l' : '';
+  $('suKind').textContent = suKind(n);
+  $('suTrack').textContent = I.name;
+  $('suDesc').textContent = suDesc(n);
+  $('suTip').textContent = SU_TIP[suTrack] || '';
+  rng.setAttribute('aria-valuetext', suKind(n) + (n ? ', ' + suLabel(n) : ''));
+  // fill from center to the thumb
+  const f = $('suFill'), x = nToSu(n) / 13 * 50;
+  f.style.left = (x < 0 ? 50 + x : 50) + '%'; f.style.width = Math.abs(x) + '%';
+  // graphic: push arrow and front tyres for tight, tail-out arc and rear tyres for loose, body yaw
+  const t = Math.max(0, -n) / 10, l = Math.max(0, n) / 10;
+  $('suPush').style.opacity = (0.08 + 0.92 * t).toFixed(2);
+  $('suRot').style.opacity = (0.08 + 0.92 * l).toFixed(2);
+  const ft = `rgb(${22 + 60 * t | 0},${23 + 120 * t | 0},${26 + 200 * t | 0})`, rt = `rgb(${22 + 230 * l | 0},${23 + 100 * l | 0},${26 + 30 * l | 0})`;
+  $('suTFL').style.fill = ft; $('suTFR').style.fill = ft; $('suTRL').style.fill = rt; $('suTRR').style.fill = rt;
+  $('suCarG').setAttribute('transform', `rotate(${(-n * 1.1).toFixed(1)} 104 116)`);
+  $('suTracks').querySelectorAll('button').forEach((b) => { const on = b.dataset.t === suTrack; b.classList.toggle('on', on); b.setAttribute('aria-checked', on ? 'true' : 'false'); b.setAttribute('role', 'radio'); });
+  const fromPause = suFrom === 'pause';
+  $('suTracks').classList.toggle('hidden', fromPause);
+  const changed = fromPause && race && race.setupN !== n;
+  $('suNote').textContent = fromPause ? (changed ? 'Saved for ' + I.short + '. It takes effect when you restart; this race keeps ' + suLabel(race.setupN) + '.' : 'Changes take effect when you restart the race.') : 'Saved for ' + I.short + ' on this phone. Leaderboards stay open to any setup.';
+  $('suRestart').classList.toggle('hidden', !changed);
+  updateSetupLabels();
+}
+function suFinishLine() { const n = race ? race.setupN : 0; return n ? '<br><span class="dsmall">Car setup ' + suLabel(n) + ' (' + suKind(n).toLowerCase() + ')</span>' : ''; }
+function updateSetupLabels() {
+  $('setupSum').textContent = setupSummary();
+  if (race) $('pauseSetup').textContent = suLabel(setupOf(S.TRACK_ID));
+}
+function openSetup(from, track) {
+  suFrom = from; suTrack = S.TRACK_INFO[track] ? track : 'indy';
+  renderSetup(); show('setup', true);
+}
+let suLast = 0;
+$('suRange').addEventListener('input', (e) => {
+  const n = suToN(+e.target.value);
+  if (n === setupOf(suTrack)) return;
+  if (n === 0 || suLast === 0) buzz('tap');           // a click as it drops into (or out of) the center detent
+  suLast = n; setupSave(suTrack, n); renderSetup();
+});
+$('suRange').addEventListener('change', (e) => { e.target.value = nToSu(setupOf(suTrack)); renderSetup(); });  // settle the thumb in the detent
+$('suTracks').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { suTrack = b.dataset.t; suLast = setupOf(suTrack); renderSetup(); }));
+$('suReset').addEventListener('click', () => { setupSave(suTrack, 0); suLast = 0; renderSetup(); buzz('tap'); });
+$('suDone').addEventListener('click', () => { show('setup', false); if (suFrom === 'pause') { show('pause', true); updateSetupLabels(); } else if (suFrom === 'tracks') buildTrackCards(); });
+$('suRestart').addEventListener('click', () => { show('setup', false); show('pause', false); startRace(); });
+$('btnSetup').addEventListener('click', () => openSetup('tracks', cfg.track));
+$('btnTitleSetup').addEventListener('click', () => openSetup('title', cfg.track));
+$('btnPauseSetup').addEventListener('click', () => { show('pause', false); openSetup('pause', S.TRACK_ID); });
+updateSetupLabels();
+
+
 // ---------------- Daily Challenge ----------------
 // One seeded race a day (daily.js): same track, laps, grid, field, time of day, wind and grip for everyone.
 // The first run of the day counts (once the green flag drops) and its best lap can go on today's board;
@@ -793,7 +877,7 @@ function showDailyFinish(p) {
   const r = dailyRec(), counted = r && r.key === d.key && r.best;
   $('fSub').innerHTML = (lap ? 'Best lap' + mph : 'No timed lap') + (race.tt ? '' : ' · finished P' + p.finishPos + ' of ' + race.cars.length) +
     '<br>' + (d.official ? (lap ? '<b class="pb">Counted for today\'s board</b>' : 'Counted run used') : 'Practice · doesn\'t post' + (counted ? ' · your counted lap ' + fmt(r.best) : '')) +
-    '<br><span class="dsmall">' + sp.trackName + ' · ' + sp.conds + '</span>';
+    '<br><span class="dsmall">' + sp.trackName + ' · ' + sp.conds + '</span>' + suFinishLine();
   $('fTable').innerHTML = lapTimes.map((t, i) => `<li class="${t === p.bestLap ? 'me' : ''}"><span class="p">${i + 1}</span><span class="sw" style="background:${t === p.bestLap ? '#f2c230' : '#5c6470'}"></span><span class="n">Lap ${i + 1}</span><span>${fmt(t)}</span></li>`).join('');
   $('btnKiss').classList.add('hidden'); $('finish').classList.remove('side');
   $('btnAgain').textContent = 'Practice';
@@ -827,7 +911,7 @@ function togglePause(force) {
   if (state !== 'race' && state !== 'paused') return;
   const p = force === undefined ? state === 'race' : force;
   if (p && state === 'race') { state = 'paused'; show('pause', true); engineSound(0, false, 0); }
-  else if (!p && state === 'paused') { state = 'race'; show('pause', false); show('settings', false); if (actx) actx.resume(); }
+  else if (!p && state === 'paused') { state = 'race'; show('pause', false); show('settings', false); show('setup', false); if (actx) actx.resume(); }
 }
 function startRace() {
   const dly = daily, sp = dly && dly.spec;
@@ -836,8 +920,9 @@ function startRace() {
   applyLook(sp ? sp.look : 'day');
   const tt = sp ? sp.mode === 'tt' : cfg.mode === 'tt';
   race = sp
-    ? S.createRace({ track: sp.track, laps: sp.laps, field: tt ? 2 : sp.field, grid: tt ? 1 : sp.grid, difficulty: sp.difficulty, assist: cfg.assist, autoThrottle: cfg.throttle === 'auto', seed: +sp.key, cond: sp.cond })
-    : S.createRace({ track: cfg.track, laps: cfg.laps, field: tt ? 2 : cfg.field, grid: tt ? 1 : Math.min(cfg.grid, cfg.field), difficulty: cfg.difficulty, assist: cfg.assist, autoThrottle: cfg.throttle === 'auto', seed: (Math.random() * 1e9) | 0 });
+    ? S.createRace({ track: sp.track, laps: sp.laps, field: tt ? 2 : sp.field, grid: tt ? 1 : sp.grid, difficulty: sp.difficulty, assist: cfg.assist, autoThrottle: cfg.throttle === 'auto', seed: +sp.key, cond: sp.cond, setup: setupOf(sp.track) / 10 })
+    : S.createRace({ track: cfg.track, laps: cfg.laps, field: tt ? 2 : cfg.field, grid: tt ? 1 : Math.min(cfg.grid, cfg.field), difficulty: cfg.difficulty, assist: cfg.assist, autoThrottle: cfg.throttle === 'auto', seed: (Math.random() * 1e9) | 0, setup: setupOf(cfg.track) / 10 });
+  race.setupN = setupOf(S.TRACK_ID);
   race.daily = dly ? { key: sp.key, official: dly.official } : null;
   document.body.classList.toggle('isdaily', !!dly);
   // time trial: just you, the pace car to the green, and your ghost
@@ -1418,7 +1503,7 @@ function showFinish() {
     const I = S.INFO, pb = saveBest(I.id, p.bestLap);
     $('fHead').textContent = 'TIME TRIAL · ' + (I.id === 'texas' ? 'TEXAS' : I.id === 'road' ? 'INDY ROAD COURSE' : 'INDIANAPOLIS');
     $('fPos').textContent = p.bestLap ? fmt(p.bestLap) : '--';
-    $('fSub').innerHTML = (p.bestLap ? 'Best lap · ' + (Math.round(I.lenMi * 3600 / p.bestLap * 10) / 10) + ' mph' : 'No timed lap') + (pb ? '<br><b class="pb">New personal best at ' + I.short + '</b>' : (bests[I.id] ? '<br>Your best here: ' + fmt(bests[I.id]) : '')) + (ghost && cfg.ghost ? '<br>👻 Your ghost now runs ' + fmt(ghost.t) : '');
+    $('fSub').innerHTML = (p.bestLap ? 'Best lap · ' + (Math.round(I.lenMi * 3600 / p.bestLap * 10) / 10) + ' mph' : 'No timed lap') + (pb ? '<br><b class="pb">New personal best at ' + I.short + '</b>' : (bests[I.id] ? '<br>Your best here: ' + fmt(bests[I.id]) : '')) + (ghost && cfg.ghost ? '<br>👻 Your ghost now runs ' + fmt(ghost.t) : '') + suFinishLine();
     $('fTable').innerHTML = lapTimes.map((t, i) => `<li class="${t === p.bestLap ? 'me' : ''}"><span class="p">${i + 1}</span><span class="sw" style="background:${t === p.bestLap ? '#f2c230' : '#5c6470'}"></span><span class="n">Lap ${i + 1}</span><span>${fmt(t)}</span></li>`).join('');
     if (window.GDGBoard && p.bestLap) { const tid = I.id, lap = p.bestLap; setTimeout(() => { if (finishShown && !$('finish').classList.contains('hidden')) window.GDGBoard.afterRound(tid, lap); }, 1200); }
     $('btnKiss').classList.add('hidden'); $('finish').classList.remove('side'); $('fPos').classList.add('time');
@@ -1431,7 +1516,7 @@ function showFinish() {
   $('fPos').textContent = 'P' + pos;
   const gained = p.grid - pos;
   const I = S.INFO, pb = saveBest(I.id, p.bestLap);
-  $('fSub').innerHTML = `${ord(pos)} of ${race.cars.length} · started ${ord(p.grid)}${gained > 0 ? ' · +' + gained + ' spots' : ''}<br>Race ${fmt(p.finishTime)}${p.bestLap ? ' · ' : ''}${p.bestLap ? 'Best lap ' + fmt(p.bestLap) + ' (' + (Math.round(I.lenMi * 3600 / p.bestLap * 10) / 10) + ' mph)' : ''}${pb ? '<br><b class="pb">New personal best at ' + I.short + '</b>' : (bests[I.id] ? '<br>Your best here: ' + fmt(bests[I.id]) : '')}`;
+  $('fSub').innerHTML = `${ord(pos)} of ${race.cars.length} · started ${ord(p.grid)}${gained > 0 ? ' · +' + gained + ' spots' : ''}<br>Race ${fmt(p.finishTime)}${p.bestLap ? ' · ' : ''}${p.bestLap ? 'Best lap ' + fmt(p.bestLap) + ' (' + (Math.round(I.lenMi * 3600 / p.bestLap * 10) / 10) + ' mph)' : ''}${pb ? '<br><b class="pb">New personal best at ' + I.short + '</b>' : (bests[I.id] ? '<br>Your best here: ' + fmt(bests[I.id]) : '')}${suFinishLine()}`;
   const st = S.standings(race);
   const rows = st.slice(0, 5); if (!rows.includes(p)) rows.push(p);
   $('fTable').innerHTML = rows.map((c) => `<li class="${c.isPlayer ? 'me' : ''}"><span class="p">${st.indexOf(c) + 1}</span><span class="sw" style="background:#${c.color.toString(16).padStart(6, '0')}"></span><span class="n">${c.name}</span><span>${c.bestLap ? fmt(c.bestLap) : ''}</span></li>`).join('');

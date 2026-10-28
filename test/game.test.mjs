@@ -261,3 +261,56 @@ test('daily challenge is wired into the page and posts to daily-YYYYMMDD', () =>
   assert.match(game, /'daily-' \+ d\.key/);
   assert.match(game, /pb = best && !race\.daily && saveBest/, 'daily laps never touch the normal personal bests');
 });
+
+
+// ---------- car setup: tight <-> loose ----------
+const tt = (track, setup, driver, seed = 5) => { const r = S.createRace({ track, laps: 3, field: 2, grid: 1, difficulty: 'pro', seed, setup }); r.cars = [r.player];
+  let spins = 0; for (let i = 0; i < 60 * 400 && !r.playerFinished; i++) { S.stepRace(r, 1 / 60, driver ? driver(r) : S.autopilotInput(r, r.player)); for (const e of r.events.splice(0)) if (e.type === 'spin') spins++; }
+  return { lap: r.player.bestLap, spins }; };
+
+test('setup at center is the exact car from before (normal races bit-identical)', () => {
+  const run = (o) => { const r = S.createRace(Object.assign({ track: 'road', laps: 2, field: 11, grid: 6, difficulty: 'pro', seed: 41 }, o)); r.autopilot = true;
+    for (let i = 0; i < 60 * 200 && !r.playerFinished; i++) S.stepRace(r, 1 / 60, {}); return r.cars.map((c) => [c.dist, c.d, c.v, c.bestLap]); };
+  const a = run({}), b = run({ setup: 0 });
+  assert.equal(S.SETUP, null);
+  run({ setup: 0.7 }); assert.ok(S.SETUP && S.SETUP.bal === 0.7, 'a setup race carries its balance');
+  const c = run({});
+  assert.equal(S.SETUP, null, 'the next race without a setup clears it');
+  assert.deepEqual(b, a); assert.deepEqual(c, a);
+  S.setTrack('indy');
+});
+
+test('tight pushes and resists spins, loose turns in faster and spins sooner', () => {
+  S.createRace({ track: 'road', setup: -1 }); const T = S.SETUP; S.createRace({ track: 'road', setup: 1 }); const Lo = S.SETUP;
+  assert.ok(T.push > 1.4 && Lo.push < 0.6, 'tight drifts up the track more in the turns');
+  assert.ok(T.tau > 0.13 && Lo.tau < 0.09 && Lo.steer > T.steer, 'loose turns in quicker and sharper');
+  assert.ok(T.spinR > 1.3 && Lo.spinR < 1.15, 'loose lets go sooner');
+  // overdriving the road course (braking a full second late): tight hits walls, loose spins
+  const late = () => { let t = 0, since = -1; return (r) => { t += 1 / 60; const p = r.player, cue = r.phase === 'green' && S.needBrake(p); if (cue && since < 0) since = t; if (!cue) since = -1; const a = S.autopilotInput(r, p); a.brake = cue && t - since > 1.0 ? 1 : 0; return a; }; };
+  const tight = tt('road', -1, late(), 11), loose = tt('road', 1, late(), 11);
+  assert.equal(tight.spins, 0); assert.ok(loose.spins >= 3, 'full loose spins when overdriven: ' + loose.spins);
+  S.createRace({ track: 'indy' }); S.setTrack('indy');
+});
+
+test('no setup is fastest everywhere: each track rewards a different balance', () => {
+  const POS = [-1, -0.5, -0.3, 0, 0.15, 0.3, 0.5, 1], best = {};
+  for (const track of ['indy', 'texas', 'road']) {
+    const laps = POS.map((b) => tt(track, b).lap);
+    for (const l of laps) assert.ok(l > 18 && l < 900);
+    best[track] = POS[laps.indexOf(Math.min(...laps))];
+    assert.ok(laps[0] > Math.min(...laps) + 0.2 && laps[POS.length - 1] > Math.min(...laps) + 0.2, track + ': both extremes cost time ' + laps.join(' '));
+  }
+  assert.ok(best.indy < 0, 'Indy likes it a touch tight: ' + best.indy);
+  assert.ok(best.road > 0, 'the road course likes it a bit loose: ' + best.road);
+  assert.ok(best.texas > best.indy, 'Texas runs freer than Indy');
+  S.createRace({ track: 'indy' }); S.setTrack('indy');
+});
+
+test('car setup screen is wired: slider with detent, per-track save, reachable before a race and from pause', () => {
+  for (const id of ['setup', 'suRange', 'suVal', 'suDesc', 'suTracks', 'suReset', 'suDone', 'btnSetup', 'btnTitleSetup', 'btnPauseSetup', 'suPush', 'suRot']) assert.match(html, new RegExp('id="' + id + '"'));
+  assert.match(html, /id="suRange" type="range" min="-13" max="13"/);
+  const game = readFileSync(path.join(site, 'game.js'), 'utf8');
+  assert.match(game, /'ktb-setup-v1'/);
+  assert.equal((game.match(/setup: setupOf\(/g) || []).length, 2, 'normal and daily races both pass the saved setup');
+  assert.equal(S.setupLabel(0), 'NEUTRAL'); assert.equal(S.setupLabel(-0.3), 'T3'); assert.equal(S.setupLabel(1), 'L10');
+});

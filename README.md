@@ -15,6 +15,26 @@ Track shapes come from OpenStreetMap raceway geometry (© OpenStreetMap contribu
 
 `npm test` runs the race-simulation tests (Node 20+).
 
+## Car setup: tight ↔ loose
+One slider, per track, saved on the phone (`localStorage` key `ktb-setup-v1`). Open it from the title screen (⚙ Setup), the track picker (Car setup) or the pause menu (changes made from pause take effect when you restart; there's a "Restart with this setup" button). It runs from **T10** (full tight) through **NEUTRAL** to **L10** (full loose), with a detent that snaps to center, a Reset to neutral button, a live description and a top-down graphic of push vs tail-out.
+
+- **Tight** (understeer / push): less front bite. Lazier, slower turn-in, the nose pushes up the track in the turns and runs wide when you overdrive it, but the rear stays planted: very hard to spin and better traction off the corner.
+- **Loose** (oversteer): more front bite. Quick turn-in and very little push, but the rear is light: the tail hangs out, traction control cuts in sooner on exit, lifting or yanking the wheel mid-corner on an oval can snap it round, and past about 60% loose it spins if you overdrive it.
+- **Corner speed**: every corner has an ideal balance. Fast, high-load corners (Indy's flat turns, the sweepers) want a touch of tight; slow corners want a bit of loose for rotation. The further the slider is from a corner's ideal, the more speed that corner costs, so no setting is fastest everywhere.
+- All of it lives in `sim.js` (`SETUP`, `makeSetup`, `setupGrip`). It applies only to your car. At NEUTRAL `SETUP` is `null` and every line of the old handling runs untouched: normal races are bit-for-bit the same as before (a test checks it).
+- Leaderboards stay open to any setup, Daily Challenge included: everyone gets the same slider, so it's part of driving skill. The finish card shows the setup you raced.
+
+Bot laps (`npm test` checks the shape), 3-lap time trial, Pro, best lap in seconds. "Clean" = autopilot on the racing line, braking on the cue. "Hard charger" = steering noise plus the odd mid-corner lift on the ovals, braking a full second late on the road course; average best lap over 6 runs (spins / wall hits in brackets).
+
+| Track | T10 | T5 | NEUTRAL | L5 | L10 | Fastest setting |
+|---|---|---|---|---|---|---|
+| Indy oval, clean | 39.28 | 38.96 | 38.98 | 39.32 | 40.05 | T3 (38.93) |
+| Texas, clean | 24.75 | 23.93 | 23.59 | 23.66 | 24.13 | L1–L2 (23.57) |
+| Road course, clean | 74.31 | 72.67 | 71.88 | 71.92 | 72.70 | L2 (71.80) |
+| Indy oval, hard charger | 39.84 (0/0) | 39.47 (0/0) | 39.43 (0/0) | 39.88 (0/0) | 42.75 (12/19) | |
+| Texas, hard charger | 25.21 (0/0) | 24.54 (0/0) | 24.18 (0/0) | 24.26 (0/0) | 24.82 (4/7) | |
+| Road course, hard charger | 68.24 (0/0) | 66.04 (0/0) | 64.78 (0/0) | 64.47 (3/0) | 89.52 (89/31) | |
+
 ## Online leaderboard
 Top 10 per board, arcade style. After a finished race (one board per track: `indy`, `texas`, `road`; best lap of the race, faster is better) that makes the top 10, the game asks for 3-letter initials (big ▲/▼ spinners, or type on a keyboard), submits, and shows the board with your entry highlighted. There's also a 🏆 Leaderboard button on the title screen and the finish card (🏆). `leaderboard.js` is the shared client (the same file in all three games). It talks to the Game Day Garage API at `https://gamedaygarage.sites.tab.bot/api`. If the API can't be reached, nothing in the game breaks: no entry screen shows, and the button says the board is offline. The local best score is still kept on the phone as before.
 
@@ -39,7 +59,7 @@ Your best lap on each track is recorded (position + heading 15 times a second, d
 - In `game.js`: textured asphalt with a rubbered-in racing line, brick yard, catch fences with posts, a textured crowd, trees, a sun with soft shadows that follows the action, tire smoke on wall and car contact, and a broadcast-style HUD.
 - Settings → Graphics: Auto (default), Max, Fast. Auto drops resolution first, then effects, to stay near 60 fps. `?gfx=high|medium|low` and `?mode=tt|race` work in the URL too.
 
-The race physics (`sim.js`) are unchanged, so lap times and the leaderboard compare with earlier versions.
+The race physics (`sim.js`) are unchanged at a NEUTRAL setup, so lap times and the leaderboard compare with earlier versions.
 
 ## Build
 The live site serves a single bundled `game.js`, made with `esbuild game.js --bundle --minify --format=iife --target=es2020 --outfile=dist/game.js`. Put `leaderboard.js`, `index.html`, `styles.css`, `gdg-badge.png` and the media next to it (`carmodel.js`, `gfx.js`, `ghost.js`, `haptics.js` and `daily.js` are bundled into `game.js`). The unbundled files in this repo also run as-is from any static server.
