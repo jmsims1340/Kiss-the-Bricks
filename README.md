@@ -61,5 +61,14 @@ Your best lap on each track is recorded (position + heading 15 times a second, d
 
 The race physics (`sim.js`) are unchanged at a NEUTRAL setup, so lap times and the leaderboard compare with earlier versions.
 
+## Announcer voice (Oct 30, 2026)
+A track announcer calls the race in a recorded US broadcaster voice (ElevenLabs `eleven_v3`, the "Rollin" library voice, the same voice as Pocket Presence): 60 calls across 23 moments, with 2 to 5 takes each so it doesn't repeat. Welcome lines per track (Indy, Texas, road course), time trial and Daily Challenge intros, the green flag, taking and losing the lead, passes, spins, hard wall hits, personal-best laps, the white flag, wins at each track, podiums, other finishes, the end of a time trial or daily run, and the Kiss the bricks / six-shooters button. Settings → 🎙 Announcer turns it off, and Sound off silences it.
+
+Settings → Coach voice now speaks the coach's lines in the same recorded voice (25 clips, fetched only when Coach voice is on). The "Lap 3 of 10" counts are shown, not spoken, and "Last lap" is left to the announcer's white-flag call.
+
+How it plays (`announcer.js`): clips are fetched at load and decoded once the game's AudioContext exists. The first tap unlocks audio on iPhone (a silent buffer, plus `navigator.audioSession.type = 'playback'` so it plays with the silent switch on). A call prefers a take that's already decoded, waits up to 1.5 s for one still downloading, and big calls (green, white flag, finish, spin) cut in over a line that's playing. The browser's speech voice is used only if a recording really fails to load, or there is no Web Audio at all. The engine note and the theme dip under the voice. The announcer has its own random numbers and never draws from the game's, so races, lap times and the leaderboards are exactly as before (`test/announcer.test.mjs` checks that, and that every call has recordings).
+
+Clips: `vo/<call><n>.mp3`, two takes rendered per line and the one that transcribed exactly kept; silence trimmed, high-pass 85 Hz, +2 dB at 3.2 kHz, light compression, -16 LUFS with a -1 dB limiter, mono 44.1 kHz 48 kbps. About 1.3 MB for the announcer, 0.34 MB for the coach. Line scripts and render settings are in `vo/lines.json`. Put `vo/` next to `game.js` when building.
+
 ## Build
-The live site serves a single bundled `game.js`, made with `esbuild game.js --bundle --minify --format=iife --target=es2020 --outfile=dist/game.js`. Put `leaderboard.js`, `index.html`, `styles.css`, `gdg-badge.png` and the media next to it (`carmodel.js`, `gfx.js`, `ghost.js`, `haptics.js` and `daily.js` are bundled into `game.js`). The unbundled files in this repo also run as-is from any static server.
+The live site serves a single bundled `game.js`, made with `esbuild game.js --bundle --minify --format=iife --target=es2020 --outfile=dist/game.js`. Put `leaderboard.js`, `index.html`, `styles.css`, `gdg-badge.png`, the `vo/` folder and the media next to it (`carmodel.js`, `gfx.js`, `ghost.js`, `haptics.js`, `daily.js` and `announcer.js` are bundled into `game.js`). The unbundled files in this repo also run as-is from any static server.

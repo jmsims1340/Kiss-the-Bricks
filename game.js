@@ -6,6 +6,7 @@ import { buildIndyCar, buildPaceCar } from './carmodel.js';
 import * as G from './ghost.js';
 import { buzz, setHaptics, onUserGesture } from './haptics.js';
 import * as D from './daily.js';
+import { Announcer, CALL_CATS, COACH_CATS, coachCat } from './announcer.js';
 
 const Q = new URLSearchParams(location.search);
 const $ = (id) => document.getElementById(id);
@@ -14,7 +15,7 @@ const fmt = (t) => { if (!t) return '--'; const m = Math.floor(t / 60), s = t - 
 const fmt1 = (t) => { const m = Math.floor(t / 60), s = t - m * 60; return m + ':' + (s < 10 ? '0' : '') + s.toFixed(1); };
 
 // ---------------- settings ----------------
-const DEF = { track: 'indy', laps: 10, steer: 'drag', sens: 1, assist: true, throttle: 'auto', difficulty: 'rookie', grid: 11, field: 33, sound: true, coach: true, coachVoice: false, ghost: true, haptics: true, gfx: 'auto', mode: 'race' };
+const DEF = { track: 'indy', laps: 10, steer: 'drag', sens: 1, assist: true, throttle: 'auto', difficulty: 'rookie', grid: 11, field: 33, sound: true, announcer: true, coach: true, coachVoice: false, ghost: true, haptics: true, gfx: 'auto', mode: 'race' };
 let cfg = Object.assign({}, DEF);
 try { Object.assign(cfg, JSON.parse(localStorage.getItem('ktb-settings') || '{}')); } catch (e) {}
 for (const k of ['laps', 'grid', 'field', 'sens']) if (Q.has(k)) cfg[k] = +Q.get(k);
@@ -523,10 +524,18 @@ function setInstance(mesh, i, f, lift = 0) {
 // ---------------- audio ----------------
 const theme = $('theme'); theme.volume = 0.55;
 let actx = null, eng = null;
+// the announcer + coach voice (recorded clips; see announcer.js)
+const ann = new Announcer();
+let themeDuck = 0;
+ann.onStart = () => { if (!theme.paused && !themeDuck) { themeDuck = theme.volume; theme.volume = themeDuck * 0.4; } };
+ann.onEnd = () => { if (themeDuck) { if (!theme.paused) theme.volume = themeDuck; themeDuck = 0; } };
+function voicePreload() { if (!cfg.sound) return; if (cfg.announcer) ann.preload(CALL_CATS); if (cfg.coachVoice && cfg.coach) ann.preload(COACH_CATS); }
+function annSay(cat, pri = 2) { if (!cfg.sound || !cfg.announcer) return false; return ann.say(cat, pri); }
 function initAudio() {
   if (actx || !cfg.sound) return;
   try {
     actx = new (window.AudioContext || window.webkitAudioContext)();
+    ann.attach(actx);
     const g = actx.createGain(); g.gain.value = 0; g.connect(actx.destination);
     const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900; lp.Q.value = 3; lp.connect(g);
     const o1 = actx.createOscillator(); o1.type = 'sawtooth'; o1.connect(lp); o1.start();
@@ -537,7 +546,7 @@ function initAudio() {
 function engineSound(v, on, draft) {
   if (!eng) return;
   const t = actx.currentTime;
-  const target = on && cfg.sound ? 0.075 : 0;
+  const target = on && cfg.sound ? (ann.speaking() ? 0.045 : 0.075) : 0;
   eng.g.gain.setTargetAtTime(target, t, 0.08);
   // six-speed feel below ~170 mph, then top gear
   const vv = v / 104.2; let r;
@@ -564,7 +573,7 @@ document.addEventListener('gesturestart', (e) => e.preventDefault());
 document.addEventListener('dblclick', (e) => e.preventDefault());
 window.addEventListener('pointerdown', (e) => {
   onUserGesture();
-  initAudio(); if (actx && actx.state === 'suspended') actx.resume();
+  initAudio(); if (actx && actx.state === 'suspended') actx.resume(); ann.unlock();
   if (state !== 'race' || isControl(e.target) || drag) return;
   if (cfg.steer !== 'drag') return;
   drag = { id: e.pointerId, x0: e.clientX, x: e.clientX, y: e.clientY };
@@ -646,7 +655,8 @@ document.querySelectorAll('.seg[data-key] button').forEach((b) => b.addEventList
   if (k === 'gfx') { autoTier = 2; applyTier(); }
   if (k === 'mode' && !$('tracks').classList.contains('hidden')) buildTrackCards();
   if (k === 'steer' && v === 'tilt') enableTilt(); else if (k === 'steer') $('tiltNote').textContent = '';
-  if (k === 'sound') { if (!v) { playTheme(false); if (eng) eng.g.gain.value = 0; } else if (state === 'title') { initAudio(); playTheme(true); } }
+  if (k === 'sound') { if (!v) { playTheme(false); if (eng) eng.g.gain.value = 0; ann.stop(); } else if (state === 'title') { initAudio(); playTheme(true); } }
+  if (k === 'sound' || k === 'announcer' || k === 'coachVoice' || k === 'coach') { voicePreload(); if ((k === 'announcer' || k === 'coachVoice' || k === 'coach') && !v) ann.stop(); }
 }));
 $('segLaps').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { cfg.laps = +b.dataset.v; syncSettings(); initAudio(); if (state === 'title') playTheme(true); }));
 // the leaderboard knows today's Daily board too (re-read each time: the day can roll over while the page is open)
@@ -678,6 +688,7 @@ function onTap(el, fn) {
 }
 onTap($('btnKiss'), () => {
   buzz('win'); initAudio(); if (actx && actx.state === 'suspended') actx.resume();
+  annSay(S.INFO.bricks ? 'kiss' : 'sixshooter', 3);
   if (S.INFO.bricks) { $('btnKiss').classList.add('hidden'); burst(160); kissed = true; winCam = 0; $('fSub').innerHTML = 'Smack. A Brickyard tradition. 🥛 Milk is on the way.'; }
   else { fireSixShooters(); $('btnKiss').textContent = '🤠 Fire again!'; $('fSub').innerHTML = 'Bang! Bang! Cowboy hat on, six-shooters in the air. That\'s how they celebrate in Texas Victory Lane. 🤠'; }
 });
@@ -905,12 +916,12 @@ renderDailyCard();
 
 function toTitle() {
   state = 'title'; show('title', true); renderDailyCard(); $('btnAgain').textContent = 'Race again'; document.body.classList.remove('isdaily'); hudEl.classList.add('hidden'); playTheme(true); engineSound(0, false, 0);
-  race = null; kissMesh.visible = false; stopConfetti(); clearSkids(); coachEl.classList.remove('on'); flagbar.classList.remove('on'); flagObj.visible = false; if (skidA) skidA.g.gain.value = 0;
+  race = null; ann.stop(); kissMesh.visible = false; stopConfetti(); clearSkids(); coachEl.classList.remove('on'); flagbar.classList.remove('on'); flagObj.visible = false; if (skidA) skidA.g.gain.value = 0;
 }
 function togglePause(force) {
   if (state !== 'race' && state !== 'paused') return;
   const p = force === undefined ? state === 'race' : force;
-  if (p && state === 'race') { state = 'paused'; show('pause', true); engineSound(0, false, 0); }
+  if (p && state === 'race') { state = 'paused'; show('pause', true); engineSound(0, false, 0); ann.stop(); }
   else if (!p && state === 'paused') { state = 'race'; show('pause', false); show('settings', false); show('setup', false); if (actx) actx.resume(); }
 }
 function startRace() {
@@ -938,6 +949,8 @@ function startRace() {
   theme.volume = 0.3;
   banner.classList.remove('on'); msgT = 0;
   resetCoach(); clearSkids(); flagPhase = ''; flagState = ''; setFlag('yellow'); placeFlag(); spinCam = 0;
+  ann.stop(); annPass = { pos: 0, t: -99, lostT: -99 };
+  { const r0 = race, intro = race.daily ? 'intro_daily' : tt ? 'intro_tt' : 'intro_' + S.INFO.id; setTimeout(() => { if (race === r0 && state === 'race' && race.phase === 'pace') annSay(intro, 2); }, 700); }
   const how = cfg.steer === 'tilt' ? 'Tilt the phone to steer.' : (matchMedia('(pointer:fine)').matches && !('ontouchstart' in window) ? 'Arrow keys to steer, ↓ to lift.' : 'Drag a thumb left/right anywhere to steer.');
   const road = S.INFO.kind === 'road';
   hint.textContent = road ? how + ' ' + (cfg.throttle === 'auto' ? 'Gas is automatic. Hold BRAKE before the corners; it glows when you need it.' : 'Hold GAS to go, BRAKE before the corners.')
@@ -1232,7 +1245,11 @@ function coachSay(key, text, pri, dur = 1.5, cool = 5) {
   coach.cur = { key, pri, t0: now }; coach.until = now + dur; coach.cool[key] = now + cool;
   coachTxt.textContent = text; coachEl.classList.toggle('urgent', pri >= 90);
   restartAnim(coachEl, 'pop'); coachEl.classList.add('on');
-  if (cfg.coachVoice && window.speechSynthesis) { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text.replace(/[!.…]+$/, '')); u.rate = 1.2; u.pitch = 0.9; speechSynthesis.speak(u); } catch (e) {} }
+  if (cfg.coachVoice && cfg.sound) {
+    // the coach speaks in the announcer's recorded voice; "Last lap" is left to the announcer's white flag call
+    const vc = coachCat(text);
+    if (vc && !(vc === 'co_last' && cfg.announcer)) ann.say(vc, pri >= 90 ? 3 : 1);
+  }
   window.KTB.coachLog.push({ t: +now.toFixed(2), key, text, pri });
   return true;
 }
@@ -1378,10 +1395,13 @@ function ghostDelta() {
   return tg === null ? null : (race.raceT - p.lapStart) - tg;
 }
 // taking the lead: a buzz and a banner (once it sticks for a moment)
+let annPass = { pos: 0, t: -99, lostT: -99 };
 function leadTick() {
   if (race.tt || race.phase !== 'green' || race.player.finished) return;
   const pos = S.positionOf(race, race.player);
-  if (pos === 1 && leadPos > 1 && race.raceT > 3 && race.raceT - leadT > 4) { leadT = race.raceT; buzz('lead'); if (msgT <= 0) showBanner('P1 · YOU LEAD', 'gold', 1.5); }
+  if (pos === 1 && leadPos > 1 && race.raceT > 3 && race.raceT - leadT > 4) { leadT = race.raceT; buzz('lead'); if (msgT <= 0) showBanner('P1 · YOU LEAD', 'gold', 1.5); annSay('lead', 2); annPass.t = race.raceT; }
+  else if (leadPos === 1 && pos > 1 && race.raceT > 3 && race.raceT - annPass.lostT > 10) { annPass.lostT = race.raceT; annSay('lostlead', 2); }
+  else if (pos > 1 && leadPos && pos < leadPos && race.raceT > 6 && race.raceT - annPass.t > 14 && !(cfg.coachVoice && cfg.coach)) { annPass.t = race.raceT; annSay('pass', 1); }
   leadPos = pos;
 }
 
@@ -1473,20 +1493,22 @@ function updateHUD(dt) {
 
 function handleEvents() {
   for (const e of race.events) {
-    if (e.type === 'green') { if (race.daily && race.daily.official) dailyMarkUsed(race.daily.key); if (!flagbar.classList.contains('on')) showBanner('GREEN  GREEN  GREEN!', 'green', 2.2); setTimeout(() => hint.classList.remove('on'), 4000); theme.volume = 0.0; playTheme(false); }
-    else if (e.type === 'wall' && e.car === race.player.id) { shake = 0.25 + Math.min(0.4, e.impact * 0.1); carFrame(race.player.dist, race.player.d + (e.inside ? -1 : 1), 0, tmpF); spawnSparks(tmpF.pos.x, tmpF.pos.y + 0.3, tmpF.pos.z, tmpF.fwd.x * race.player.v * 0.8, tmpF.fwd.z * race.player.v * 0.8, 24); buzz(e.impact > 2.5 ? 'crash' : 'wall'); wallSmoke(e); coachEvent(e); }
+    if (e.type === 'green') { if (race.daily && race.daily.official) dailyMarkUsed(race.daily.key); if (!flagbar.classList.contains('on')) showBanner('GREEN  GREEN  GREEN!', 'green', 2.2); setTimeout(() => hint.classList.remove('on'), 4000); theme.volume = 0.0; playTheme(false); annSay(race.tt ? 'tt_green' : 'green', 3); }
+    else if (e.type === 'wall' && e.car === race.player.id) { shake = 0.25 + Math.min(0.4, e.impact * 0.1); carFrame(race.player.dist, race.player.d + (e.inside ? -1 : 1), 0, tmpF); spawnSparks(tmpF.pos.x, tmpF.pos.y + 0.3, tmpF.pos.z, tmpF.fwd.x * race.player.v * 0.8, tmpF.fwd.z * race.player.v * 0.8, 24); buzz(e.impact > 2.5 ? 'crash' : 'wall'); wallSmoke(e); if (e.impact > 2.5 && !race.player.spin) annSay('crash', 2); coachEvent(e); }
     else if ((e.type === 'bump' || e.type === 'rub')) { shake = Math.max(shake, 0.12); contactSmoke(e.type === 'bump'); if (e.type === 'bump') buzz('wall'); }
-    else if (e.type === 'spin' && e.car === race.player.id) { showBanner('SPIN!', 'gold', 1.4); buzz('crash'); coachEvent(e); }
+    else if (e.type === 'spin' && e.car === race.player.id) { showBanner('SPIN!', 'gold', 1.4); buzz('crash'); if (!(cfg.coachVoice && cfg.coach)) annSay('spin', 3); coachEvent(e); }
     else if (e.type === 'spinEnd' && e.car === race.player.id) coachEvent(e);
     else if (e.type === 'lap') {
       coachEvent(e);
       const p = race.player, left = race.opts.laps - e.lap;
       const best = p.bestLap === e.time, pb = best && !race.daily && saveBest(S.INFO.id, e.time);
       if (pb || pbLap === e.time) buzz('best');
+      if (left === 1) annSay('white', 3); else if (pb && left > 0) annSay('pb', 2);
       if (left === 1) showBanner((pb ? 'PERSONAL BEST ' + fmt(e.time) + ' · ' : '') + 'WHITE FLAG · FINAL LAP', pb ? 'gold' : 'white', 2.2);
       else showBanner('LAP ' + e.lap + '  ' + fmt(e.time) + (pb ? '  PERSONAL BEST' : best ? '  BEST' : ''), best ? 'gold' : 'white', 1.8);
     } else if (e.type === 'finish' && e.car === race.player.id) {
       showBanner('CHECKERED FLAG!', 'white', 2.5); buzz(e.pos === 1 && !race.tt ? 'win' : 'finish');
+      annSay(race.daily && race.daily.official ? 'daily_done' : race.tt ? 'tt_finish' : e.pos === 1 ? 'win_' + S.INFO.id : e.pos <= 3 ? 'podium' : 'finish', 3);
       setTimeout(showFinish, 1400);
     }
   }
@@ -1609,11 +1631,11 @@ function idleCam(t) {
 window.KTB = { S, camera, G, get ghost() { return ghost; }, ghostDelta: () => (race ? ghostDelta() : null), get ghostVisible() { return ghostCar.visible; }, get tier() { return tier; }, get post() { return !!post; }, get lapTimes() { return lapTimes; }, get standAt() { return standAt; }, get state() { return state; }, race: null, fps: 0, coachLog: [], coachSay: (...a) => coachSay(...a), get coachCfg() { return cfg.coach; }, startRace, applyTrack, buildTrackCards, setTimeScale: (x) => { timeScale = x; }, renderer,
   // test hook: run the race simulation (and the ghost recorder / events) without rendering
   ff: (sec) => { if (!race) return; for (let t = 0; t < sec; t += 0.05) { const lb = race.player.lapStart, fb = race.player.finished; S.stepRace(race, 0.05, input); ghostTick(lb, fb); leadTick(); handleEvents(); } },
-  tris: () => { const o = {}; for (const [k, v] of Object.entries(CG)) o[k] = v.attributes.position.count / 3; return o; } };
+  tris: () => { const o = {}; for (const [k, v] of Object.entries(CG)) o[k] = v.attributes.position.count / 3; return o; }, ann, annSay };
 applyTrack(cfg.track);
 setCarCount(0); shMesh.count = 0;
 setHaptics(cfg.haptics); applyTier(true);
-resize(); syncSettings();
+resize(); syncSettings(); voicePreload();
 $('loading').classList.add('hidden');
 requestAnimationFrame(frame);
 if (Q.has('autostart')) startRace();

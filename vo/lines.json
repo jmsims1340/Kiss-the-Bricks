@@ -1,0 +1,188 @@
+{
+ "voice": "Rollin (ElevenLabs library voice lh03wW2cCRf05ksqPizq)",
+ "model": "eleven_v3",
+ "settings": "take 0 stability 0.5, take 1 stability 0.0; seed 1000+77*take+i",
+ "lines": {
+  "intro_indy": [
+   "[excited] Welcome to the Indianapolis Motor Speedway! The greatest spectacle in racing!",
+   "[excited] Back home again in Indiana... and the field is rolling!"
+  ],
+  "intro_texas": [
+   "[excited] Welcome to Texas Motor Speedway! High banks and big speed!",
+   "[excited] Everything's bigger in Texas... including the speed!"
+  ],
+  "intro_road": [
+   "[excited] Welcome to the road course at the Brickyard! Fourteen turns, and the bricks waiting at the end!",
+   "[excited] The Indianapolis road course! Hard braking, and no room for mistakes!"
+  ],
+  "intro_tt": [
+   "Just you and the clock. Let's see what you've got.",
+   "Time trial. Clean laps... nothing else matters."
+  ],
+  "intro_daily": [
+   "[excited] It's the daily challenge! One run counts, so make it a good one!",
+   "[excited] Daily challenge time! Same race for everybody... let's see what you've got!"
+  ],
+  "green": [
+   "[shouting] Green flag! Green flag! And they're racing!",
+   "[shouting] And there's the green! Here we go!",
+   "[shouting] Green, green, green! The race is on!",
+   "[excited] Down comes the green flag... [shouting] and they're off!"
+  ],
+  "tt_green": [
+   "[excited] And the clock is running!",
+   "[excited] He's on a hot lap... the clock is running!"
+  ],
+  "lead": [
+   "[shouting] And there's a new leader!",
+   "[shouting] He takes the lead!",
+   "[excited] Into the lead! What a move!",
+   "[shouting] Out front! He's leading the race!"
+  ],
+  "lostlead": [
+   "[shocked] Oh, he's lost the lead!",
+   "[groans] Passed for the lead!",
+   "[excited] And there's a change at the front!"
+  ],
+  "pass": [
+   "[excited] Makes the pass!",
+   "[excited] Picks off another one!",
+   "[excited] Gets by him... clean pass!",
+   "[excited] He's moving forward!",
+   "[excited] Another spot gained!"
+  ],
+  "spin": [
+   "[shocked] Oh, he's around! He's spinning!",
+   "[shouting] Spin! Spin! He's lost it!",
+   "[shocked] Loses the rear... and around he goes!"
+  ],
+  "crash": [
+   "[shocked] Into the wall! Hard contact!",
+   "[shouting] Oh, he's hit the wall!",
+   "[groans] Ooh, that's gonna leave a mark!"
+  ],
+  "pb": [
+   "[excited] New personal best! What a lap!",
+   "[excited] That's the fastest he's ever been around here!",
+   "[excited] Personal best! He is flying!"
+  ],
+  "white": [
+   "[excited] White flag! One lap to go!",
+   "[shouting] There's the white flag! Final lap!",
+   "[excited] One to go... this is it!"
+  ],
+  "win_indy": [
+   "[shouting] He wins at Indianapolis! Go kiss those bricks!",
+   "[shouting] Checkered flag! Victory at the Brickyard!",
+   "[excited] Into Victory Lane... [shouting] he's gonna drink the milk!"
+  ],
+  "win_texas": [
+   "[shouting] He wins in Texas! Fire up those six-shooters!",
+   "[shouting] Checkered flag! Texas belongs to him!"
+  ],
+  "win_road": [
+   "[shouting] Checkered flag! He wins the Grand Prix at the Brickyard!",
+   "[shouting] Victory on the road course! Go kiss those bricks!"
+  ],
+  "podium": [
+   "[excited] Checkered flag! A podium finish!",
+   "[excited] Crosses the line on the podium! Great drive!"
+  ],
+  "finish": [
+   "[excited] Checkered flag! He brings it home.",
+   "There's the checkered flag. This one's in the books.",
+   "[excited] Takes the checkered flag! Good run."
+  ],
+  "tt_finish": [
+   "And that's the session. Let's see the times.",
+   "[excited] Session's over! Check out that lap time!"
+  ],
+  "daily_done": [
+   "[excited] That's your daily challenge in the books!",
+   "[excited] The run is in! Let's see where it ranks today!"
+  ],
+  "kiss": [
+   "[laughs] Pucker up! He's kissing the bricks!",
+   "[excited] A Brickyard tradition! Smack!"
+  ],
+  "sixshooter": [
+   "[shouting] Yee-haw! Fire 'em up!",
+   "[shouting] Bang, bang! That's how they do it in Texas!"
+  ],
+  "co_spin": [
+   "[urgent] Hold on... let it stop rotating."
+  ],
+  "co_spinend": [
+   "Gather it up. Smooth on the throttle."
+  ],
+  "co_last": [
+   "[excited] Last lap! Bring it home!"
+  ],
+  "co_wallr": [
+   "Stay off the tires. Brake a touch earlier."
+  ],
+  "co_wallo": [
+   "Easy, off the wall. Give it room."
+  ],
+  "co_pacer": [
+   "Brake when the brake button glows."
+  ],
+  "co_paceo": [
+   "Hold your spot. Go on the green."
+  ],
+  "co_ready": [
+   "Get ready..."
+  ],
+  "co_slide": [
+   "[urgent] Sliding! Lift and catch it!"
+  ],
+  "co_smooth": [
+   "Smooth on the throttle."
+  ],
+  "co_brake2": [
+   "[urgent] Brake now! Earlier than last lap."
+  ],
+  "co_brake1": [
+   "[urgent] Brake now!"
+  ],
+  "co_brake": [
+   "Brake."
+  ],
+  "co_left": [
+   "Move left for a better line."
+  ],
+  "co_right": [
+   "Move right for a better line."
+  ],
+  "co_turnin": [
+   "Turn in."
+  ],
+  "co_apex": [
+   "Apex. Clip the curb."
+  ],
+  "co_out": [
+   "Track out. Power on."
+  ],
+  "co_pulllow": [
+   "[urgent] Pull out now! Go low!"
+  ],
+  "co_pullhigh": [
+   "[urgent] Pull out now! Go high!"
+  ],
+  "co_draft": [
+   "In the draft. Stay tucked in."
+  ],
+  "co_low": [
+   "Go low. Hug the bottom of the turn."
+  ],
+  "co_up": [
+   "Move up. Set up high for the turn."
+  ],
+  "co_lift": [
+   "[urgent] Lift! Wall!"
+  ],
+  "co_pass": [
+   "[excited] Nice pass!"
+  ]
+ }
+}
