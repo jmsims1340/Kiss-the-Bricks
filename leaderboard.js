@@ -3,7 +3,7 @@
    reached, nothing breaks: afterRound() quietly resolves false and the game carries on. */
 (function () {
   'use strict';
-  var API = 'https://gamedaygarage.sites.tab.bot/api';
+  var API = 'https://gamedaygarage.jmsims40.workers.dev/api';
   var BLOCK = ('ASS ASZ AZZ FUK FUC FUQ FUX FCK FKU FKN FAG FGT CUM CUN CNT KKK DIK DIC DIX DYK COK COC KOK JIZ JIS NIG NGR NGA NGG NIP TIT TTS SEX SXY XXX PUS PSY VAG WTF POO PEE SHT SHI HOE WHR SLT TWT NAZ KYS SUK SUC HOR GAY ANL ANS BUM BJS PIS PSS PRN POR RAP FAP DMN JEW WOP SPC SPK GOK KUM FUG DCK PNS MFR MOF STF').split(' ');
   var A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   var C = { game: '', title: 'LEADERBOARD', boards: { main: 'Top 10' }, order: 'asc', fmt: function (s) { return String(s); }, unit: '', accent: '#f2c230' };
