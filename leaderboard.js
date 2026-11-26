@@ -50,6 +50,24 @@
   function el(tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function css() { if (document.getElementById('gdglb-css')) return; var s = el('style'); s.id = 'gdglb-css'; s.textContent = CSS; document.head.appendChild(s); }
+  // Same /go handoff and per-game token storage as the garage achievements client.
+  var profileReady = Promise.resolve();
+  var handoff = /(?:^#|&)gdg=([0-9a-f]{32})(?:&|$)/.exec(location.hash || '');
+  if (handoff) {
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+    profileReady = req('/auth/exchange', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: handoff[1] }) }).then(function (j) {
+      if (j.ok && j.token) try { localStorage.setItem('gdg.tok.v1', j.token); } catch (e) {}
+    }).catch(function () {}); // Old hub/offline play must still work.
+  }
+  function postHeaders(preset) {
+    var h = { 'Content-Type': 'application/json' }, own = !preset;
+    try {
+      if (!own) own = preset === localStorage.getItem('gdg.initials');
+      var t = own && localStorage.getItem('gdg.tok.v1');
+      if (t) h.Authorization = 'Bearer ' + t;
+    } catch (e) {}
+    return h;
+  }
   function req(path, opt) {
     var ctl = typeof AbortController !== 'undefined' ? new AbortController() : null; var t = ctl && setTimeout(function () { ctl.abort(); }, 7000);
     opt = opt || {}; if (ctl) opt.signal = ctl.signal;
@@ -152,9 +170,9 @@
         var ini = word(); if (BLOCK.indexOf(ini) >= 0) { msg.textContent = 'Pick different initials'; return; }
         if (busy) return; busy = true; go.textContent = 'SAVING…'; go.disabled = true;
         try { localStorage.setItem('gdg.initials', ini); } catch (e) {}
-        req('/scores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ game: C.game, board: board, initials: ini, score: score }) })
+        req('/scores', { method: 'POST', headers: postHeaders(null), body: JSON.stringify({ game: C.game, board: board, initials: ini, score: score }) })
           .then(function (j) { busy = false; cache[board] = j.scores; try { window.GDGBoard.last = { id: j.id, token: j.delete_token, board: board }; } catch (e) {} show(board, j.id, j.scores); resolve(true); },
-            function (e) { busy = false; if (e && e.code === 'initials_not_allowed') { go.disabled = false; go.textContent = 'ENTER ▶'; msg.textContent = 'Pick different initials'; return; } msg.style.color = '#ffcf6b'; msg.textContent = "Couldn't reach the leaderboard. Your local best is still saved."; setTimeout(function () { close(); resolve(false); }, 1600); });
+            function (e) { busy = false; if (e && (e.code === 'daily_limit_reached' || e.code === 'daily_profile_required')) { msg.style.color = '#ffcf6b'; msg.textContent = e.code === 'daily_limit_reached' ? 'Out of daily tries. Come back tomorrow! Free play is still open.' : 'Start this game from My Garage at Game Day Garage to use your free guest profile.'; go.textContent = 'NOT SAVED'; resolve(false); return; } if (e && e.code === 'initials_not_allowed') { go.disabled = false; go.textContent = 'ENTER ▶'; msg.textContent = 'Pick different initials'; return; } msg.style.color = '#ffcf6b'; msg.textContent = "Couldn't reach the leaderboard. Your local best is still saved."; setTimeout(function () { close(); resolve(false); }, 1600); });
       }
     });
   }
@@ -168,7 +186,7 @@
     afterRound: function (board, score) {
       if (typeof score !== 'number' || !isFinite(score) || !C.game || !C.boards[board]) return Promise.resolve(false);
       score = Math.round(score * 100) / 100;
-      return getBoard(board).then(function (list) {
+      return profileReady.then(function () { return getBoard(board); }).then(function (list) {
         var q = list.length < 10 || better(score, list[list.length - 1].score);
         if (!q) return false;
         return entry(board, score, rankOf(list, score));
